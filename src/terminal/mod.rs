@@ -6,7 +6,10 @@ use crossterm::{
         PushKeyboardEnhancementFlags,
     },
     execute, queue,
-    style::{Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor},
+    style::{
+        Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
+        SetUnderlineColor,
+    },
     terminal::{self, ClearType},
 };
 use std::io::{self, Stdout, Write};
@@ -166,6 +169,52 @@ fn terminal_cursor_style(
         (TerminalCursorShape::Beam, true) => cursor::SetCursorStyle::BlinkingBar,
         (TerminalCursorShape::Beam, false) => cursor::SetCursorStyle::SteadyBar,
         (TerminalCursorShape::Hidden, _) => cursor::SetCursorStyle::DefaultUserShape,
+    }
+}
+
+fn diagnostic_severity_priority(severity: DiagnosticSeverity) -> u8 {
+    match severity {
+        DiagnosticSeverity::Error => 0,
+        DiagnosticSeverity::Warning => 1,
+        DiagnosticSeverity::Information => 2,
+        DiagnosticSeverity::Hint => 3,
+    }
+}
+
+fn diagnostic_at_col<'a>(
+    diagnostics: &[&'a Diagnostic],
+    line_num: usize,
+    col: usize,
+) -> Option<&'a Diagnostic> {
+    diagnostics
+        .iter()
+        .copied()
+        .filter(|d| {
+            if line_num < d.line || line_num > d.end_line {
+                return false;
+            }
+            if d.line == d.end_line {
+                col >= d.col_start && col < d.col_end
+            } else if line_num == d.line {
+                col >= d.col_start
+            } else if line_num == d.end_line {
+                col < d.col_end
+            } else {
+                true
+            }
+        })
+        .min_by_key(|d| diagnostic_severity_priority(d.severity))
+}
+
+fn diagnostic_underline_color(
+    diagnostic: &Diagnostic,
+    diagnostic_error_color: Color,
+) -> Option<Color> {
+    match diagnostic.severity {
+        DiagnosticSeverity::Error => Some(diagnostic_error_color),
+        DiagnosticSeverity::Warning
+        | DiagnosticSeverity::Information
+        | DiagnosticSeverity::Hint => None,
     }
 }
 
@@ -800,6 +849,7 @@ impl Terminal {
                     selection_bg,
                     search_bg,
                     search_fg,
+                    theme.diagnostic.error,
                     theme.ui.line_number, // Use grey color for unused code (hint diagnostics)
                 )?;
 
@@ -1132,6 +1182,7 @@ impl Terminal {
                         selection_bg,
                         search_bg,
                         search_fg,
+                        theme.diagnostic.error,
                         theme.ui.line_number, // Use grey color for unused code (hint diagnostics)
                     )?;
 
@@ -1343,6 +1394,7 @@ impl Terminal {
         selection_bg: Color,
         search_match_bg: Color,
         search_match_fg: Color,
+        diagnostic_error_color: Color,
         diagnostic_hint_color: Color,
     ) -> anyhow::Result<()> {
         let chars: Vec<char> = text.chars().collect();
@@ -1361,45 +1413,11 @@ impl Terminal {
                 .any(|(l, start, end)| *l == line_num && col >= *start && col < *end)
         };
 
-        // Find diagnostic at this column (prioritize by severity: Error > Warning > Info > Hint)
-        // Handles multiline diagnostics correctly:
-        // - First line: from col_start to end of line
-        // - Middle lines: entire line
-        // - Last line: from start of line to col_end
-        let get_diagnostic_at = |col: usize| -> Option<&Diagnostic> {
-            diagnostics
-                .iter()
-                .filter(|d| {
-                    if line_num < d.line || line_num > d.end_line {
-                        return false; // Not within diagnostic line range
-                    }
-                    if d.line == d.end_line {
-                        // Single-line diagnostic
-                        col >= d.col_start && col < d.col_end
-                    } else if line_num == d.line {
-                        // First line of multiline: from col_start to end
-                        col >= d.col_start
-                    } else if line_num == d.end_line {
-                        // Last line of multiline: from start to col_end
-                        col < d.col_end
-                    } else {
-                        // Middle line: entire line is covered
-                        true
-                    }
-                })
-                .min_by_key(|d| match d.severity {
-                    DiagnosticSeverity::Error => 0,
-                    DiagnosticSeverity::Warning => 1,
-                    DiagnosticSeverity::Information => 2,
-                    DiagnosticSeverity::Hint => 3,
-                })
-                .copied()
-        };
-
         let mut current_fg: Option<Color> = None;
         let mut current_bg: Option<Color> = None;
         let mut current_bold = false;
         let mut current_italic = false;
+        let mut current_underline_color: Option<Color> = None;
 
         for (i, ch) in chars.iter().enumerate() {
             // Calculate the actual column in the original line
@@ -1437,7 +1455,7 @@ impl Terminal {
             // Check if in search match
             let is_search = in_search_match(actual_col);
 
-            let diag_at_col = get_diagnostic_at(actual_col);
+            let diag_at_col = diagnostic_at_col(diagnostics, line_num, actual_col);
 
             // Find syntax highlight for this position
             let syntax_style = highlights
@@ -1468,6 +1486,12 @@ impl Terminal {
             };
             let desired_bold = desired_style.map_or(false, |style| style.bold);
             let desired_italic = desired_style.map_or(false, |style| style.italic);
+            let desired_underline_color = if in_visual || is_search {
+                None
+            } else {
+                diag_at_col
+                    .and_then(|diag| diagnostic_underline_color(diag, diagnostic_error_color))
+            };
 
             // Only change colors when necessary
             if Some(desired_bg) != current_bg {
@@ -1499,6 +1523,22 @@ impl Terminal {
                     })
                 )?;
                 current_italic = desired_italic;
+            }
+            if desired_underline_color != current_underline_color {
+                if let Some(color) = desired_underline_color {
+                    execute!(
+                        self.stdout,
+                        SetUnderlineColor(color),
+                        SetAttribute(Attribute::Undercurled)
+                    )?;
+                } else {
+                    execute!(
+                        self.stdout,
+                        SetAttribute(Attribute::NoUnderline),
+                        SetUnderlineColor(Color::Reset)
+                    )?;
+                }
+                current_underline_color = desired_underline_color;
             }
 
             print!("{}", ch);
@@ -5079,6 +5119,7 @@ impl Terminal {
         selection_bg: Color,
         search_match_bg: Color,
         search_match_fg: Color,
+        diagnostic_error_color: Color,
         diagnostic_hint_color: Color,
     ) -> anyhow::Result<()> {
         let chars: Vec<char> = line.chars().collect();
@@ -5137,47 +5178,13 @@ impl Terminal {
                 .any(|(l, start, end)| *l == line_idx && actual_col >= *start && actual_col < *end)
         };
 
-        // Find diagnostic at this column (prioritize by severity: Error > Warning > Info > Hint)
-        // Handles multiline diagnostics correctly:
-        // - First line: from col_start to end of line
-        // - Middle lines: entire line
-        // - Last line: from start of line to col_end
-        let get_diagnostic_at = |actual_col: usize| -> Option<&Diagnostic> {
-            diagnostics
-                .iter()
-                .filter(|d| {
-                    if line_idx < d.line || line_idx > d.end_line {
-                        return false; // Not within diagnostic line range
-                    }
-                    if d.line == d.end_line {
-                        // Single-line diagnostic
-                        actual_col >= d.col_start && actual_col < d.col_end
-                    } else if line_idx == d.line {
-                        // First line of multiline: from col_start to end
-                        actual_col >= d.col_start
-                    } else if line_idx == d.end_line {
-                        // Last line of multiline: from start to col_end
-                        actual_col < d.col_end
-                    } else {
-                        // Middle line: entire line is covered
-                        true
-                    }
-                })
-                .min_by_key(|d| match d.severity {
-                    DiagnosticSeverity::Error => 0,
-                    DiagnosticSeverity::Warning => 1,
-                    DiagnosticSeverity::Information => 2,
-                    DiagnosticSeverity::Hint => 3,
-                })
-                .copied()
-        };
-
         // Render character by character
         let mut highlight_idx = 0;
         let mut current_fg: Option<Color> = None;
         let mut current_bg: Option<Color> = None;
         let mut current_bold = false;
         let mut current_italic = false;
+        let mut current_underline_color: Option<Color> = None;
         for (i, ch) in chars.iter().enumerate() {
             // Map display column to actual buffer column
             let actual_col = col_offset + i;
@@ -5193,7 +5200,7 @@ impl Terminal {
             // Check if in search match
             let is_search_match = in_search_match(actual_col);
 
-            let diag_at_col = get_diagnostic_at(actual_col);
+            let diag_at_col = diagnostic_at_col(diagnostics, line_idx, actual_col);
 
             // Check if within a hint diagnostic (unused variable/import) - grey out the text
             let is_hint_diagnostic =
@@ -5217,6 +5224,12 @@ impl Terminal {
             };
             let desired_bold = desired_style.map_or(false, |style| style.bold);
             let desired_italic = desired_style.map_or(false, |style| style.italic);
+            let desired_underline_color = if is_selected || is_search_match {
+                None
+            } else {
+                diag_at_col
+                    .and_then(|diag| diagnostic_underline_color(diag, diagnostic_error_color))
+            };
 
             // Only change colors when necessary
             if Some(desired_bg) != current_bg {
@@ -5248,6 +5261,22 @@ impl Terminal {
                     })
                 )?;
                 current_italic = desired_italic;
+            }
+            if desired_underline_color != current_underline_color {
+                if let Some(color) = desired_underline_color {
+                    execute!(
+                        self.stdout,
+                        SetUnderlineColor(color),
+                        SetAttribute(Attribute::Undercurled)
+                    )?;
+                } else {
+                    execute!(
+                        self.stdout,
+                        SetAttribute(Attribute::NoUnderline),
+                        SetUnderlineColor(Color::Reset)
+                    )?;
+                }
+                current_underline_color = desired_underline_color;
             }
 
             print!("{}", ch);
@@ -8654,15 +8683,16 @@ pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_command, finder_preview_match_ranges, handle_insert_mode, handle_key,
-        replace_completion_text,
+        diagnostic_at_col, diagnostic_underline_color, execute_command,
+        finder_preview_match_ranges, handle_insert_mode, handle_key, replace_completion_text,
     };
     use crate::commands::Command;
     use crate::config::{KeymapEntry, Settings};
     use crate::editor::{Editor, Mode, RegisterContent};
     use crate::input::Motion;
-    use crate::lsp::types::{CompletionItem, CompletionKind};
+    use crate::lsp::types::{CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::style::Color;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8704,6 +8734,49 @@ mod tests {
             additional_text_edits: Vec::new(),
             raw_data: None,
         }
+    }
+
+    fn diagnostic(
+        line: usize,
+        col_start: usize,
+        col_end: usize,
+        severity: DiagnosticSeverity,
+    ) -> Diagnostic {
+        Diagnostic {
+            line,
+            col_start,
+            end_line: line,
+            col_end,
+            message: "diagnostic".to_string(),
+            severity,
+            source: None,
+            code: None,
+        }
+    }
+
+    #[test]
+    fn diagnostic_underline_color_marks_error_range_only() {
+        let diag = diagnostic(0, 4, 10, DiagnosticSeverity::Error);
+        let diagnostics = vec![&diag];
+        let underline_color = Color::Rgb { r: 255, g: 0, b: 0 };
+
+        assert_eq!(
+            diagnostic_at_col(&diagnostics, 0, 6)
+                .and_then(|diag| diagnostic_underline_color(diag, underline_color)),
+            Some(underline_color)
+        );
+        assert!(diagnostic_at_col(&diagnostics, 0, 3).is_none());
+        assert!(diagnostic_at_col(&diagnostics, 0, 10).is_none());
+    }
+
+    #[test]
+    fn diagnostic_underline_color_skips_hints() {
+        let diag = diagnostic(0, 0, 5, DiagnosticSeverity::Hint);
+
+        assert_eq!(
+            diagnostic_underline_color(&diag, Color::Rgb { r: 255, g: 0, b: 0 }),
+            None
+        );
     }
 
     #[test]
