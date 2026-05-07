@@ -3452,6 +3452,63 @@ impl Terminal {
         Ok(())
     }
 
+    fn diagnostic_float_text_area_x(editor: &Editor) -> u16 {
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        let line_num_width = editor.buffer().len_lines().to_string().len().max(3) as u16;
+        active_pane.rect.x.saturating_add(2 + line_num_width + 1)
+    }
+
+    fn diagnostic_float_width(editor: &Editor, max_line_width: usize) -> u16 {
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        let text_area_x = Self::diagnostic_float_text_area_x(editor);
+        let pane_right = active_pane.rect.x.saturating_add(active_pane.rect.width);
+        let max_width = pane_right
+            .saturating_sub(text_area_x)
+            .min(editor.term_width.saturating_sub(text_area_x))
+            .max(4);
+
+        (max_line_width + 4).min(max_width as usize).max(4) as u16
+    }
+
+    /// Calculate where the diagnostic floating popup should start on screen.
+    fn diagnostic_float_position(
+        editor: &Editor,
+        popup_width: u16,
+        popup_height: u16,
+    ) -> (u16, u16) {
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        let cursor_row = (editor
+            .cursor
+            .line
+            .saturating_sub(active_pane.viewport_offset)) as u16;
+        let cursor_screen_row = active_pane.rect.y.saturating_add(cursor_row);
+
+        let popup_y = if cursor_screen_row
+            .saturating_add(1)
+            .saturating_add(popup_height)
+            < editor.term_height.saturating_sub(2)
+        {
+            cursor_screen_row + 1
+        } else if cursor_screen_row > popup_height {
+            cursor_screen_row - popup_height
+        } else {
+            active_pane.rect.y.min(
+                editor
+                    .term_height
+                    .saturating_sub(popup_height.saturating_add(1)),
+            )
+        };
+
+        let text_area_x = Self::diagnostic_float_text_area_x(editor);
+        let cursor_col = editor.cursor.col.saturating_sub(active_pane.h_offset) as u16;
+        let cursor_screen_col = text_area_x.saturating_add(cursor_col);
+        let pane_right = active_pane.rect.x.saturating_add(active_pane.rect.width);
+        let max_popup_x = pane_right.saturating_sub(popup_width).max(text_area_x);
+        let popup_x = cursor_screen_col.min(max_popup_x).max(text_area_x);
+
+        (popup_x, popup_y)
+    }
+
     /// Render the diagnostic floating popup (like vim.diagnostic.open_float())
     fn render_diagnostic_float(&mut self, editor: &Editor) -> anyhow::Result<()> {
         let diagnostics = editor.diagnostics_for_line(editor.cursor.line);
@@ -3488,29 +3545,13 @@ impl Terminal {
             .map(|(_, l)| l.chars().count())
             .max()
             .unwrap_or(20);
-        let popup_width = (max_line_width + 4).min(editor.term_width as usize - 4) as u16;
+        let popup_width = Self::diagnostic_float_width(editor, max_line_width);
         let popup_height = (lines.len() + 2).min(editor.term_height as usize - 4) as u16;
         let content_width = (popup_width - 4) as usize;
 
-        // Position popup below the cursor line
-        let active_pane = &editor.panes()[editor.active_pane_idx()];
-        let cursor_row = (editor
-            .cursor
-            .line
-            .saturating_sub(active_pane.viewport_offset)) as u16;
-        let line_num_width = editor.buffer().len_lines().to_string().len().max(3);
-
-        // Try to position below cursor, or above if not enough space
-        let popup_y = if cursor_row + 1 + popup_height < editor.term_height.saturating_sub(2) {
-            cursor_row + 1
-        } else if cursor_row > popup_height {
-            cursor_row - popup_height
-        } else {
-            1 // Fallback to near top
-        };
-
-        // Position at the left edge of text area
-        let popup_x = (2 + line_num_width) as u16;
+        // Position at the active pane's text area, below the cursor line.
+        let (popup_x, popup_y) =
+            Self::diagnostic_float_position(editor, popup_width, popup_height);
 
         // Colors
         let border_color = Color::Rgb {
@@ -8716,6 +8757,7 @@ mod tests {
     use super::{
         apply_diagnostic_underline, diagnostic_at_col, diagnostic_underline_color, execute_command,
         finder_preview_match_ranges, handle_insert_mode, handle_key, replace_completion_text,
+        Terminal,
     };
     use crate::commands::Command;
     use crate::config::{KeymapEntry, Settings};
@@ -8849,6 +8891,85 @@ mod tests {
         assert!(rendered.contains("\x1b[24m"));
         assert!(rendered.contains("\x1b[59m"));
         assert!(rendered.ends_with("\x1b[38;2;198;120;221m"));
+    }
+
+    #[test]
+    fn diagnostic_float_position_uses_active_pane_cursor_origin() {
+        let mut editor = Editor::default();
+        editor.set_size(120, 40);
+        editor.replace_buffer_content("fn main() {\n    missing();\n}\n");
+        editor.hsplit(None).expect("split");
+        editor.open_explorer();
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        assert!(active_pane.rect.x > 0, "explorer should offset pane x");
+        assert!(
+            active_pane.rect.y > 0,
+            "horizontal split should offset pane y"
+        );
+
+        let line_num_width = editor.buffer().len_lines().to_string().len().max(3) as u16;
+        let (popup_x, popup_y) = Terminal::diagnostic_float_position(&editor, 24, 5);
+
+        assert_eq!(popup_x, active_pane.rect.x + 2 + line_num_width + 1 + 4);
+        assert_eq!(popup_y, active_pane.rect.y + 2);
+    }
+
+    #[test]
+    fn diagnostic_float_position_tracks_cursor_column_inside_right_split() {
+        let mut editor = Editor::default();
+        editor.set_size(160, 40);
+        editor.replace_buffer_content("const value = getMergedRepos();\n");
+        editor.open_explorer();
+        editor.vsplit(None).expect("split");
+        editor.mode = Mode::Normal;
+        editor.cursor.line = 0;
+        editor.cursor.col = 14;
+
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        assert!(active_pane.rect.x > editor.explorer.width);
+
+        let line_num_width = editor.buffer().len_lines().to_string().len().max(3) as u16;
+        let text_area_x = active_pane.rect.x + 2 + line_num_width + 1;
+        let (popup_x, _) = Terminal::diagnostic_float_position(&editor, 24, 5);
+
+        assert_eq!(popup_x, text_area_x + 14);
+    }
+
+    #[test]
+    fn diagnostic_float_width_fits_active_pane_text_area() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 24);
+        editor.replace_buffer_content("fn main() {\n    let bodyStream = ;\n}\n");
+        editor.vsplit(None).expect("split");
+        editor.cursor.line = 1;
+
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        let line_num_width = editor.buffer().len_lines().to_string().len().max(3) as u16;
+        let text_area_x = active_pane.rect.x + 2 + line_num_width + 1;
+
+        let popup_width = Terminal::diagnostic_float_width(&editor, 80);
+
+        assert!(popup_width >= 4);
+        assert!(text_area_x + popup_width <= active_pane.rect.x + active_pane.rect.width);
+    }
+
+    #[test]
+    fn diagnostic_float_position_does_not_shift_before_active_pane_for_wide_messages() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 24);
+        editor.replace_buffer_content("fn main() {\n    let bodyStream = ;\n}\n");
+        editor.vsplit(None).expect("split");
+        editor.cursor.line = 1;
+
+        let active_pane = &editor.panes()[editor.active_pane_idx()];
+        let line_num_width = editor.buffer().len_lines().to_string().len().max(3) as u16;
+        let text_area_x = active_pane.rect.x + 2 + line_num_width + 1;
+        let (popup_x, _) = Terminal::diagnostic_float_position(&editor, 41, 5);
+
+        assert_eq!(popup_x, text_area_x);
     }
 
     #[test]
