@@ -597,9 +597,9 @@ impl Terminal {
         self.set_mouse_capture(Self::should_capture_mouse(editor))?;
         execute!(self.stdout, cursor::MoveTo(0, 0))?;
 
-        // Skip rendering background when finder is open - it's a large overlay
-        // that covers most of the screen, so rendering underneath is wasted work
-        let skip_background = editor.mode == Mode::Finder;
+        // Large overlays fully cover the content area, so repainting the editor
+        // behind them only wastes work and can flash between redraw phases.
+        let skip_background = Self::should_skip_background(editor);
 
         if !skip_background {
             let num_panes = editor.panes().len();
@@ -3675,6 +3675,10 @@ impl Terminal {
 
     fn should_capture_mouse(editor: &Editor) -> bool {
         editor.floating_terminal.is_visible() || editor.markdown_preview.is_some()
+    }
+
+    fn should_skip_background(editor: &Editor) -> bool {
+        editor.mode == Mode::Finder || editor.markdown_preview.is_some()
     }
 
     /// Render the diagnostic floating popup (like vim.diagnostic.open_float())
@@ -9462,6 +9466,23 @@ mod tests {
             editor.markdown_preview.as_ref().unwrap().scroll,
             scroll_after_inside
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_skips_background_redraw_while_overlay_is_open() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_skip_background");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.open_file(markdown_path).expect("open markdown");
+        assert!(!Terminal::should_skip_background(&editor));
+
+        editor.open_markdown_preview().expect("open preview");
+        assert!(Terminal::should_skip_background(&editor));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
