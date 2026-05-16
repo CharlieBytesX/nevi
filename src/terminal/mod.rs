@@ -8552,6 +8552,11 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             }
         }
 
+        Command::MarkdownPreview => match editor.open_markdown_preview() {
+            Ok(()) => CommandResult::Ok,
+            Err(message) => CommandResult::Message(message.to_string()),
+        },
+
         Command::NoHighlight => {
             editor.search_matches.clear();
             CommandResult::Ok
@@ -9080,6 +9085,32 @@ mod tests {
         assert!(rendered.contains("\x1b[24m"));
         assert!(rendered.contains("\x1b[59m"));
         assert!(rendered.ends_with("\x1b[38;2;198;120;221m"));
+    }
+
+    #[test]
+    fn markdown_preview_command_opens_only_for_markdown_buffers() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_command");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        let rust_path = tmp.join("main.rs");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+        std::fs::write(&rust_path, "fn main() {}\n").expect("write rust");
+
+        let mut markdown = Editor::default();
+        markdown.open_file(markdown_path).expect("open markdown");
+        execute_command(&mut markdown, Command::MarkdownPreview);
+        assert!(markdown.markdown_preview.is_some());
+
+        let mut rust = Editor::default();
+        rust.open_file(rust_path).expect("open rust");
+        execute_command(&mut rust, Command::MarkdownPreview);
+        assert!(rust.markdown_preview.is_none());
+        assert_eq!(
+            rust.status_message.as_deref(),
+            Some("Markdown preview is only available for Markdown buffers")
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
