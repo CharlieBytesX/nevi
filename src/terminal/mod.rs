@@ -3672,6 +3672,22 @@ impl Terminal {
         Self::markdown_preview_rect(editor).height.saturating_sub(3) as usize
     }
 
+    fn markdown_preview_footer(scroll: usize, total_rows: usize, visible_rows: usize) -> String {
+        let position = if total_rows == 0 {
+            "0/0".to_string()
+        } else {
+            let start = scroll.saturating_add(1).min(total_rows);
+            let end = scroll.saturating_add(visible_rows).min(total_rows).max(start);
+            if start == end {
+                format!("{start}/{total_rows}")
+            } else {
+                format!("{start}-{end}/{total_rows}")
+            }
+        };
+
+        format!(" j/k scroll • Ctrl-d/u page • g/G top/bottom • {position} • q close ")
+    }
+
     fn should_capture_mouse(editor: &Editor) -> bool {
         editor.floating_terminal.is_visible()
     }
@@ -3878,7 +3894,8 @@ impl Terminal {
             SetBackgroundColor(theme.ui.popup_bg)
         )?;
         print!("│");
-        let footer = " j/k scroll • Ctrl-d/u page • q close ";
+        let footer = Self::markdown_preview_footer(scroll, display_lines.len(), visible_rows);
+        let footer = take_display_width(&footer, 0, inner_width, editor.settings.editor.tab_width);
         print!("{:^width$}", footer, width = inner_width);
         execute!(self.stdout, SetForegroundColor(theme.ui.popup_border))?;
         print!("│");
@@ -5974,6 +5991,10 @@ fn handle_markdown_preview_key(editor: &mut Editor, key: KeyEvent) {
         }
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
             editor.scroll_markdown_preview(-half_page, visible_rows)
+        }
+        (KeyModifiers::NONE, KeyCode::Char('g')) => editor.jump_markdown_preview_to_top(),
+        (KeyModifiers::SHIFT, KeyCode::Char('G')) | (KeyModifiers::NONE, KeyCode::Char('G')) => {
+            editor.jump_markdown_preview_to_bottom(visible_rows)
         }
         _ => {}
     }
@@ -9381,6 +9402,46 @@ mod tests {
         assert!(editor.markdown_preview.is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_keys_jump_to_top_and_bottom() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_jump_keys");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.set_size(80, 20);
+        editor.open_file(markdown_path).expect("open markdown");
+        editor.replace_buffer_content(&(0..50).map(|i| format!("line {i}\n")).collect::<String>());
+        editor.open_markdown_preview().expect("open preview");
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        let visible_rows = Terminal::markdown_preview_visible_rows(&editor).max(1);
+        let max_scroll = editor
+            .markdown_preview
+            .as_ref()
+            .unwrap()
+            .max_scroll(visible_rows);
+        assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, max_scroll);
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, 0);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_footer_includes_position_and_jump_hint() {
+        assert_eq!(
+            Terminal::markdown_preview_footer(12, 42, 10),
+            " j/k scroll • Ctrl-d/u page • g/G top/bottom • 13-22/42 • q close "
+        );
+        assert_eq!(
+            Terminal::markdown_preview_footer(0, 1, 10),
+            " j/k scroll • Ctrl-d/u page • g/G top/bottom • 1/1 • q close "
+        );
     }
 
     #[test]

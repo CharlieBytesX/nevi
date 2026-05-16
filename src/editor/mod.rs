@@ -1288,6 +1288,20 @@ impl Editor {
         preview.scroll = next.min(preview.max_scroll(visible_rows));
     }
 
+    /// Jump the Markdown preview to the first rendered row.
+    pub fn jump_markdown_preview_to_top(&mut self) {
+        if let Some(preview) = &mut self.markdown_preview {
+            preview.scroll = 0;
+        }
+    }
+
+    /// Jump the Markdown preview to the last rendered row that can start a page.
+    pub fn jump_markdown_preview_to_bottom(&mut self, visible_rows: usize) {
+        if let Some(preview) = &mut self.markdown_preview {
+            preview.scroll = preview.max_scroll(visible_rows);
+        }
+    }
+
     /// Get the project root or current working directory
     pub fn working_directory(&self) -> std::path::PathBuf {
         self.project_root.clone().unwrap_or_else(|| {

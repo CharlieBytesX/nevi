@@ -75,7 +75,7 @@ nevi file1.rs file2.rs
 - `:w` - Save
 - `:q` - Quit
 - `:wq` - Save and quit
-- `:MarkdownPreview` - Open rendered Markdown reader for `.md` files
+- `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
 - `<Space>e` - File explorer
