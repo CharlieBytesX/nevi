@@ -65,20 +65,48 @@ pub struct MarkdownPreview {
 #[derive(Debug, Clone)]
 pub struct MarkdownPreviewState {
     pub lines: Vec<PreviewLine>,
+    display_lines: Vec<PreviewLine>,
     pub scroll: usize,
+    wrap_width: usize,
 }
 
 impl MarkdownPreviewState {
-    pub fn new(preview: MarkdownPreview) -> Self {
+    pub fn new(preview: MarkdownPreview, width: usize) -> Self {
+        let display_lines = wrap_preview_lines(&preview.lines, width);
         Self {
             lines: preview.lines,
+            display_lines,
             scroll: 0,
+            wrap_width: width,
         }
     }
 
-    pub fn max_scroll(&self, visible_rows: usize) -> usize {
-        self.lines.len().saturating_sub(visible_rows)
+    pub fn display_lines(&self) -> &[PreviewLine] {
+        &self.display_lines
     }
+
+    pub fn max_scroll(&self, visible_rows: usize) -> usize {
+        self.display_lines.len().saturating_sub(visible_rows)
+    }
+
+    pub fn reflow(&mut self, width: usize) {
+        if self.wrap_width == width {
+            return;
+        }
+
+        self.display_lines = wrap_preview_lines(&self.lines, width);
+        self.wrap_width = width;
+    }
+}
+
+pub fn preview_popup_width(term_width: u16) -> u16 {
+    let preferred_width = term_width.saturating_mul(9) / 10;
+    let max_width = term_width.saturating_sub(4);
+    preferred_width.min(max_width).max(term_width.min(20))
+}
+
+pub fn preview_content_width(term_width: u16) -> usize {
+    preview_popup_width(term_width).saturating_sub(2) as usize
 }
 
 pub fn render_markdown(source: &str) -> MarkdownPreview {
@@ -294,6 +322,153 @@ fn flush_plain(spans: &mut Vec<PreviewSpan>, plain: &mut String) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StyledChar {
+    ch: char,
+    style: PreviewSpanStyle,
+}
+
+pub fn wrap_preview_lines(lines: &[PreviewLine], width: usize) -> Vec<PreviewLine> {
+    lines
+        .iter()
+        .flat_map(|line| wrap_preview_line(line, width))
+        .collect()
+}
+
+fn wrap_preview_line(line: &PreviewLine, width: usize) -> Vec<PreviewLine> {
+    use unicode_width::UnicodeWidthChar;
+
+    if width == 0
+        || matches!(
+            line.kind,
+            PreviewLineKind::Blank | PreviewLineKind::Rule | PreviewLineKind::CodeBlock
+        )
+    {
+        return vec![line.clone()];
+    }
+
+    let mut remaining = styled_chars(line);
+    if remaining.is_empty() {
+        return vec![line.clone()];
+    }
+
+    let continuation_indent = continuation_indent(line);
+    let continuation_width = continuation_indent.chars().count().min(width);
+    let continuation_prefix = vec![
+        StyledChar {
+            ch: ' ',
+            style: PreviewSpanStyle::Plain,
+        };
+        continuation_width
+    ];
+
+    let mut wrapped = Vec::new();
+    let mut first_row = true;
+
+    while !remaining.is_empty() {
+        let prefix = if first_row {
+            Vec::new()
+        } else {
+            continuation_prefix.clone()
+        };
+        let prefix_width = prefix
+            .iter()
+            .map(|styled| UnicodeWidthChar::width(styled.ch).unwrap_or(0))
+            .sum::<usize>();
+        let available_width = width.saturating_sub(prefix_width).max(1);
+
+        let mut consumed_width = 0usize;
+        let mut fit_count = 0usize;
+        let mut last_whitespace = None;
+
+        for (idx, styled) in remaining.iter().enumerate() {
+            let char_width = UnicodeWidthChar::width(styled.ch).unwrap_or(0);
+            if consumed_width.saturating_add(char_width) > available_width {
+                break;
+            }
+
+            consumed_width += char_width;
+            fit_count = idx + 1;
+            if styled.ch.is_whitespace() {
+                last_whitespace = Some(idx);
+            }
+        }
+
+        let (line_count, mut consume_count) = if fit_count == remaining.len() {
+            (fit_count, fit_count)
+        } else if let Some(last_whitespace) = last_whitespace.filter(|idx| *idx > 0) {
+            (last_whitespace, last_whitespace + 1)
+        } else {
+            let forced = fit_count.max(1);
+            (forced, forced)
+        };
+
+        while consume_count < remaining.len() && remaining[consume_count].ch.is_whitespace() {
+            consume_count += 1;
+        }
+
+        let mut row = prefix;
+        row.extend_from_slice(&remaining[..line_count]);
+        wrapped.push(PreviewLine::from_spans(
+            line.kind,
+            spans_from_styled_chars(row),
+        ));
+
+        remaining.drain(..consume_count);
+        first_row = false;
+    }
+
+    wrapped
+}
+
+fn continuation_indent(line: &PreviewLine) -> String {
+    match line.kind {
+        PreviewLineKind::ListItem => {
+            let text = line.plain_text();
+            let indent = text
+                .chars()
+                .position(|ch| ch == ' ')
+                .map(|idx| idx + 1)
+                .unwrap_or(2);
+            " ".repeat(indent)
+        }
+        PreviewLineKind::Quote => "  ".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn styled_chars(line: &PreviewLine) -> Vec<StyledChar> {
+    line.spans
+        .iter()
+        .flat_map(|span| {
+            span.text.chars().map(move |ch| StyledChar {
+                ch,
+                style: span.style,
+            })
+        })
+        .collect()
+}
+
+fn spans_from_styled_chars(chars: Vec<StyledChar>) -> Vec<PreviewSpan> {
+    let mut spans: Vec<PreviewSpan> = Vec::new();
+
+    for styled in chars {
+        if let Some(last) = spans.last_mut() {
+            if last.style == styled.style {
+                last.text.push(styled.ch);
+                continue;
+            }
+        }
+
+        spans.push(PreviewSpan {
+            text: styled.ch.to_string(),
+            style: styled.style,
+        });
+    }
+
+    spans
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,6 +525,44 @@ mod tests {
 
         assert_eq!(preview.lines[0].plain_text(), "| a | b |");
         assert_eq!(preview.lines[1].plain_text(), "|---|---|");
+    }
+
+    #[test]
+    fn wraps_prose_at_word_boundaries_for_the_preview_width() {
+        let preview = render_markdown("alpha beta gamma delta");
+        let wrapped = wrap_preview_lines(&preview.lines, 12);
+        let text: Vec<_> = wrapped.iter().map(PreviewLine::plain_text).collect();
+
+        assert_eq!(text, vec!["alpha beta", "gamma delta"]);
+    }
+
+    #[test]
+    fn wraps_list_continuations_with_indent_but_keeps_code_blocks_unwrapped() {
+        let preview = render_markdown("- alpha beta gamma\n\n```txt\nalpha beta gamma\n```");
+        let wrapped = wrap_preview_lines(&preview.lines, 10);
+        let text: Vec<_> = wrapped.iter().map(PreviewLine::plain_text).collect();
+
+        assert_eq!(
+            text,
+            vec!["• alpha", "  beta", "  gamma", "", "alpha beta gamma"]
+        );
+    }
+
+    #[test]
+    fn wrapped_rows_drive_scroll_limits() {
+        let preview = MarkdownPreviewState::new(render_markdown("alpha beta gamma"), 10);
+
+        assert_eq!(preview.max_scroll(1), 1);
+        assert_eq!(preview.max_scroll(2), 0);
+    }
+
+    #[test]
+    fn reflows_cached_rows_when_the_preview_width_changes() {
+        let mut preview = MarkdownPreviewState::new(render_markdown("alpha beta gamma"), 20);
+        assert_eq!(preview.display_lines().len(), 1);
+
+        preview.reflow(10);
+        assert_eq!(preview.display_lines().len(), 2);
     }
 
     #[test]

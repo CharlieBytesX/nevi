@@ -1262,7 +1262,10 @@ impl Editor {
         }
 
         let rendered = crate::markdown_preview::render_markdown(&self.buffer().content());
-        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::new(rendered));
+        let width = crate::markdown_preview::preview_content_width(self.term_width);
+        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::new(
+            rendered, width,
+        ));
         Ok(())
     }
 
@@ -2336,6 +2339,9 @@ impl Editor {
     pub fn set_size(&mut self, width: u16, height: u16) {
         self.term_width = width;
         self.term_height = height;
+        if let Some(preview) = &mut self.markdown_preview {
+            preview.reflow(crate::markdown_preview::preview_content_width(width));
+        }
         self.update_pane_rects();
         self.sync_floating_terminal_size();
     }

@@ -3656,11 +3656,7 @@ impl Terminal {
     }
 
     fn markdown_preview_rect(editor: &Editor) -> crate::editor::Rect {
-        let preferred_width = editor.term_width.saturating_mul(9) / 10;
-        let max_width = editor.term_width.saturating_sub(4);
-        let width = preferred_width
-            .min(max_width)
-            .max(editor.term_width.min(20));
+        let width = crate::markdown_preview::preview_popup_width(editor.term_width);
         let max_height = editor.term_height.saturating_sub(4);
         let height = max_height.max(editor.term_height.min(5));
 
@@ -3826,6 +3822,10 @@ impl Terminal {
         let rect = Self::markdown_preview_rect(editor);
         let visible_rows = rect.height.saturating_sub(3) as usize;
         let inner_width = rect.width.saturating_sub(2) as usize;
+        let display_lines = preview.display_lines();
+        let scroll = preview
+            .scroll
+            .min(display_lines.len().saturating_sub(visible_rows));
         let theme = editor.theme();
 
         execute!(
@@ -3857,7 +3857,7 @@ impl Terminal {
             )?;
             print!("│");
 
-            if let Some(line) = preview.lines.get(preview.scroll + row) {
+            if let Some(line) = display_lines.get(scroll + row) {
                 Self::render_markdown_preview_line(&mut self.stdout, line, inner_width, editor)?;
             } else {
                 print!("{:width$}", "", width = inner_width);
