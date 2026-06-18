@@ -1,11 +1,20 @@
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use globset::{GlobBuilder, GlobMatcher};
 use lsp_types::{
-    DidChangeWatchedFilesRegistrationOptions, FileChangeType, GlobPattern, OneOf,
+    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions, FileChangeType,
+    FileEvent, GlobPattern, OneOf,
     RegistrationParams, RelativePattern, UnregistrationParams, WatchKind,
 };
+#[cfg(test)]
+use lsp_types::Url;
+use notify::event::{ModifyKind, RenameMode};
+use notify::{Event, EventKind};
+use serde_json::json;
+
+use super::client::SharedStdin;
 
 pub(crate) const WATCHED_FILES_METHOD: &str = "workspace/didChangeWatchedFiles";
 
@@ -215,6 +224,67 @@ impl CompiledWatcher {
     }
 }
 
+fn event_changes(event: &Event) -> Vec<(PathBuf, FileChangeType)> {
+    match &event.kind {
+        EventKind::Create(_) => event
+            .paths
+            .iter()
+            .cloned()
+            .map(|path| (path, FileChangeType::CREATED))
+            .collect(),
+        EventKind::Remove(_) => event
+            .paths
+            .iter()
+            .cloned()
+            .map(|path| (path, FileChangeType::DELETED))
+            .collect(),
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() >= 2 => {
+            vec![
+                (event.paths[0].clone(), FileChangeType::DELETED),
+                (event.paths[1].clone(), FileChangeType::CREATED),
+            ]
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => event
+            .paths
+            .iter()
+            .cloned()
+            .map(|path| (path, FileChangeType::DELETED))
+            .collect(),
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => event
+            .paths
+            .iter()
+            .cloned()
+            .map(|path| (path, FileChangeType::CREATED))
+            .collect(),
+        EventKind::Modify(_) => event
+            .paths
+            .iter()
+            .cloned()
+            .map(|path| (path, FileChangeType::CHANGED))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn build_notification(changes: Vec<FileEvent>) -> Result<String> {
+    let body = serde_json::to_string(&json!({
+        "jsonrpc": "2.0",
+        "method": WATCHED_FILES_METHOD,
+        "params": DidChangeWatchedFilesParams { changes },
+    }))?;
+    Ok(format!("Content-Length: {}\r\n\r\n{}", body.len(), body))
+}
+
+fn write_notification(stdin: &SharedStdin, changes: Vec<FileEvent>) -> Result<()> {
+    let message = build_notification(changes)?;
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_| anyhow!("failed to lock LSP stdin"))?;
+    stdin.write_all(message.as_bytes())?;
+    stdin.flush()?;
+    Ok(())
+}
+
 // Task 2 intentionally lands parser/matcher foundations before Tasks 4 and 5
 // wire them into the runtime watcher and dynamic-registration routing.
 const _: fn(
@@ -225,13 +295,16 @@ const _: fn(Option<serde_json::Value>) -> std::result::Result<Vec<String>, Watch
     parse_unregister_params;
 const _: fn(&lsp_types::FileSystemWatcher, &Path) -> Result<CompiledWatcher> = compile_watcher;
 const _: fn(&CompiledWatcher, &Path, FileChangeType) -> bool = CompiledWatcher::matches;
+const _: fn(&Event) -> Vec<(PathBuf, FileChangeType)> = event_changes;
+const _: fn(Vec<FileEvent>) -> Result<String> = build_notification;
+const _: fn(&SharedStdin, Vec<FileEvent>) -> Result<()> = write_notification;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lsp_types::{
         FileSystemWatcher, Registration, RegistrationParams, Unregistration, UnregistrationParams,
-        Url, WorkspaceFolder,
+        WorkspaceFolder,
     };
     use serde_json::json;
 
@@ -446,5 +519,46 @@ mod tests {
         assert!(compiled.matches(&path, FileChangeType::CREATED));
         assert!(!compiled.matches(&path, FileChangeType::CHANGED));
         assert!(compiled.matches(&path, FileChangeType::DELETED));
+    }
+
+    #[test]
+    fn rename_event_becomes_delete_then_create() {
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            paths: vec![
+                PathBuf::from("/tmp/nevi-watch-root/src/old.rs"),
+                PathBuf::from("/tmp/nevi-watch-root/src/new.rs"),
+            ],
+            attrs: Default::default(),
+        };
+
+        assert_eq!(
+            event_changes(&event),
+            vec![
+                (
+                    PathBuf::from("/tmp/nevi-watch-root/src/old.rs"),
+                    FileChangeType::DELETED,
+                ),
+                (
+                    PathBuf::from("/tmp/nevi-watch-root/src/new.rs"),
+                    FileChangeType::CREATED,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn did_change_watched_files_message_is_valid_json_rpc() {
+        let changes = vec![FileEvent::new(
+            Url::parse("file:///tmp/nevi-watch-root/src/main.rs").unwrap(),
+            FileChangeType::CHANGED,
+        )];
+
+        let message = build_notification(changes).expect("notification");
+        let (_, body) = message.split_once("\r\n\r\n").expect("framed message");
+        let body: serde_json::Value = serde_json::from_str(body).expect("JSON body");
+
+        assert_eq!(body["method"], WATCHED_FILES_METHOD);
+        assert_eq!(body["params"]["changes"][0]["type"], 2);
     }
 }
