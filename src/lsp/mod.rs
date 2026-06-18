@@ -295,6 +295,21 @@ fn run_lsp_thread(
         }
     };
 
+    let mut watched_files = match watched_files::WatchedFilesHandle::start(
+        root_path.clone(),
+        stdin.clone(),
+        notification_tx.clone(),
+    ) {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = notification_tx.send(LspNotification::Error {
+                message: format!("Failed to start LSP file watcher: {error}"),
+            });
+            return;
+        }
+    };
+    let watcher_tx = watched_files.command_sender();
+
     // Start stdout reader thread
     let stdout = match client.take_stdout() {
         Some(s) => s,
@@ -311,7 +326,7 @@ fn run_lsp_thread(
     // so responses are guaranteed to find their request kinds
     let notification_tx_clone = notification_tx.clone();
     let reader_handle = thread::spawn(move || {
-        client::read_messages(stdout, notification_tx_clone, pending, stdin);
+        client::read_messages(stdout, notification_tx_clone, pending, stdin, watcher_tx);
     });
 
     // Spawn stderr reader thread to capture LSP server errors
@@ -506,6 +521,8 @@ fn run_lsp_thread(
             }
         }
     }
+
+    watched_files.shutdown();
 
     // Wait for reader thread to finish (it will exit when stdout closes)
     let _ = reader_handle.join();
