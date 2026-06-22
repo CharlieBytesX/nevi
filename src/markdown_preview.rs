@@ -64,6 +64,7 @@ pub struct MarkdownPreview {
 
 #[derive(Debug, Clone)]
 pub struct MarkdownPreviewState {
+    pub title: String,
     pub lines: Vec<PreviewLine>,
     display_lines: Vec<PreviewLine>,
     pub scroll: usize,
@@ -72,8 +73,13 @@ pub struct MarkdownPreviewState {
 
 impl MarkdownPreviewState {
     pub fn new(preview: MarkdownPreview, width: usize) -> Self {
+        Self::with_title(preview, width, "Markdown Preview")
+    }
+
+    pub fn with_title(preview: MarkdownPreview, width: usize, title: impl Into<String>) -> Self {
         let display_lines = wrap_preview_lines(&preview.lines, width);
         Self {
+            title: title.into(),
             lines: preview.lines,
             display_lines,
             scroll: 0,
@@ -554,6 +560,16 @@ mod tests {
 
         assert_eq!(preview.max_scroll(1), 1);
         assert_eq!(preview.max_scroll(2), 0);
+    }
+
+    #[test]
+    fn preview_state_supports_custom_titles() {
+        let default_preview = MarkdownPreviewState::new(render_markdown("alpha"), 20);
+        assert_eq!(default_preview.title, "Markdown Preview");
+
+        let health_preview =
+            MarkdownPreviewState::with_title(render_markdown("# Nevi Health"), 20, "Health");
+        assert_eq!(health_preview.title, "Health");
     }
 
     #[test]

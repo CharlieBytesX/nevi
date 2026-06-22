@@ -138,6 +138,8 @@ pub enum Command {
     Themes,
     /// :Keymaps - Open searchable keybinding cheatsheet
     Keymaps,
+    /// :checkhealth - Open the editor health report
+    CheckHealth,
     /// :marks - Show all marks
     Marks,
     /// :delmarks {marks} - Delete specified marks
@@ -587,6 +589,12 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         takes_args: false,
     },
     CommandSpec {
+        command: "checkhealth",
+        aliases: &["CheckHealth", "Health", "health"],
+        description: "Open editor health report",
+        takes_args: false,
+    },
+    CommandSpec {
         command: "marks",
         aliases: &[],
         description: "Show all marks",
@@ -975,6 +983,7 @@ pub fn parse_command(input: &str) -> Command {
         }
         "Themes" | "themes" => Command::Themes,
         "Keymaps" | "keymaps" | "keys" => Command::Keymaps,
+        "checkhealth" | "CheckHealth" | "Health" | "health" => Command::CheckHealth,
 
         // Marks commands
         "marks" => Command::Marks,
@@ -1551,6 +1560,25 @@ mod tests {
         assert!(matches!(parse_command("Keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keys"), Command::Keymaps));
+    }
+
+    #[test]
+    fn checkhealth_command_is_parseable_and_suggested() {
+        assert!(matches!(parse_command("checkhealth"), Command::CheckHealth));
+        assert!(matches!(parse_command("CheckHealth"), Command::CheckHealth));
+        assert!(matches!(parse_command("Health"), Command::CheckHealth));
+
+        let suggestions = command_suggestions("health", 8);
+        assert!(
+            suggestions.iter().any(|item| item.command == "checkhealth"),
+            "expected checkhealth to match health query"
+        );
+
+        let rows = command_cheatsheet_rows();
+        assert!(
+            rows.iter().any(|(name, _)| name == ":checkhealth"),
+            "expected :checkhealth in command cheatsheet rows"
+        );
     }
 
     #[test]

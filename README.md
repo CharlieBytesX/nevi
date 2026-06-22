@@ -80,6 +80,7 @@ nevi file1.rs file2.rs
 - `:w` - Save
 - `:q` - Quit
 - `:wq` - Save and quit
+- `:checkhealth` / `:Health` - Open editor health report
 - `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
@@ -277,6 +278,10 @@ Nevi writes raw timing events and a summary to `/tmp/nevi_profile.log`. The
 summary includes count, retained sample count, total, average, p50, p95, and max
 microseconds for metrics such as key handling, syntax updates, full renders, and
 terminal-only renders.
+
+Run `:checkhealth` (or `:Health`) inside Nevi to see config paths, LSP settings,
+profiling status, and any profile summary from `/tmp/nevi_profile.log`. Profile
+summaries are written when a profiled Nevi session exits.
 
 ## License
 

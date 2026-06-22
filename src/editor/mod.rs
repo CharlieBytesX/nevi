@@ -1547,6 +1547,16 @@ impl Editor {
         Ok(())
     }
 
+    /// Open a snapshot health report in the read-only preview overlay.
+    pub fn open_health_report(&mut self) {
+        let report = crate::health::collect_health_report(&self.settings);
+        let rendered = crate::markdown_preview::render_markdown(&report);
+        let width = crate::markdown_preview::preview_content_width(self.term_width);
+        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::with_title(
+            rendered, width, "Health",
+        ));
+    }
+
     /// Close the floating Markdown preview.
     pub fn close_markdown_preview(&mut self) {
         self.markdown_preview = None;

@@ -24,18 +24,11 @@ use nevi::{
 };
 
 fn profile_enabled_from_env() -> bool {
-    profile_enabled_from_value(env::var("NEVI_PROFILE").ok().as_deref())
+    nevi::health::profile_enabled_from_env()
 }
 
 fn profile_enabled_from_value(value: Option<&str>) -> bool {
-    let Some(value) = value.map(str::trim) else {
-        return false;
-    };
-
-    value == "1"
-        || value.eq_ignore_ascii_case("true")
-        || value.eq_ignore_ascii_case("yes")
-        || value.eq_ignore_ascii_case("on")
+    nevi::health::profile_enabled_from_value(value)
 }
 
 fn editor_redraw_interval(
@@ -136,7 +129,7 @@ fn main() -> anyhow::Result<()> {
     // Profiling is opt-in with NEVI_PROFILE=1/true/yes/on.
     let profile_enabled = profile_enabled_from_env();
     let mut profile_file = if profile_enabled {
-        Some(std::fs::File::create("/tmp/nevi_profile.log").ok())
+        Some(std::fs::File::create(nevi::health::PROFILE_LOG_PATH).ok())
     } else {
         None
     };
