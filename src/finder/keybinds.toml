@@ -26,10 +26,9 @@
 # <Space> = Space   <BS> = Backspace
 #
 # ORGANIZATION:
-# Within each category, implemented keybinds come first, followed by
-# a "--- NOT IMPLEMENTED YET ---" separator, then planned keybinds.
+# Within each category, implemented keybinds are grouped by behavior.
 #
-# Last Updated: 2026-06-18
+# Last Updated: 2026-06-22
 # ============================================================================
 
 # ============================================================================
@@ -938,10 +937,8 @@ status = "implemented"
 vim_default = false
 
 # ----------------------------------------------------------------------------
-# G commands - Miscellaneous (NOT IMPLEMENTED YET)
+# G commands - Miscellaneous
 # ----------------------------------------------------------------------------
-
-# --- NOT IMPLEMENTED YET ---
 
 [[normal.g_commands]]
 key = "gf"
@@ -1924,13 +1921,11 @@ desc = "Alternate file name (read-only)"
 status = "implemented"
 vim_default = true
 
-# --- NOT IMPLEMENTED YET ---
-
 [[registers]]
 key = "\"="
 action = "expression_register"
 desc = "Expression register"
-status = "planned"
+status = "implemented"
 vim_default = true
 
 # ============================================================================

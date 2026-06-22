@@ -44,6 +44,15 @@ pub enum Mode {
     RenamePrompt,
 }
 
+/// Where the expression-register result should be applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpressionRegisterTarget {
+    /// Normal mode: keep the result in the expression register for the next operation.
+    Normal,
+    /// Insert mode: insert the result immediately at the cursor.
+    Insert,
+}
+
 impl Mode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -867,6 +876,12 @@ pub struct Editor {
     current_inserted_text: String,
     /// Insert mode is waiting for a register name after `<C-r>`.
     pub pending_insert_register: bool,
+    /// Expression register input is active after `"=` or `<C-r>=`.
+    pub pending_expression_register: Option<ExpressionRegisterTarget>,
+    /// Expression being typed for the expression register.
+    pub expression_register_input: String,
+    /// Last evaluated expression register value.
+    expression_register_value: Option<String>,
     /// Insert mode temporarily handed control to one normal-mode command after `<C-o>`.
     pub pending_insert_normal_once: bool,
     /// Previous jump position for `''` command (path, line, col)
@@ -1061,6 +1076,198 @@ impl ThemePicker {
     }
 }
 
+fn evaluate_expression_register(input: &str) -> Result<String, String> {
+    let expression = input.trim();
+    if expression.is_empty() {
+        return Err("empty expression".to_string());
+    }
+
+    if let Some(text) = parse_quoted_expression(expression)? {
+        return Ok(text);
+    }
+
+    let mut parser = ExpressionParser::new(expression);
+    let value = parser.parse_expression()?;
+    parser.skip_ws();
+    if !parser.is_done() {
+        return Err("unexpected trailing input".to_string());
+    }
+    Ok(format_expression_number(value))
+}
+
+fn parse_quoted_expression(input: &str) -> Result<Option<String>, String> {
+    let mut chars = input.chars();
+    let Some(quote @ ('\'' | '"')) = chars.next() else {
+        return Ok(None);
+    };
+
+    let mut output = String::new();
+    let mut escaped = false;
+    while let Some(ch) = chars.next() {
+        if escaped {
+            let resolved = match ch {
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                '\\' => '\\',
+                '\'' => '\'',
+                '"' => '"',
+                other => other,
+            };
+            output.push(resolved);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == quote {
+            if chars.as_str().trim().is_empty() {
+                return Ok(Some(output));
+            }
+            return Err("unexpected trailing input".to_string());
+        }
+        output.push(ch);
+    }
+
+    Err("unterminated string".to_string())
+}
+
+fn format_expression_number(value: f64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let normalized = if value.abs() < 1e-12 { 0.0 } else { value };
+    if normalized.fract().abs() < 1e-12 {
+        return format!("{}", normalized.trunc() as i64);
+    }
+
+    let mut text = format!("{:.12}", normalized);
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
+struct ExpressionParser<'a> {
+    input: &'a str,
+    pos: usize,
+}
+
+impl<'a> ExpressionParser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input, pos: 0 }
+    }
+
+    fn is_done(&self) -> bool {
+        self.pos >= self.input.len()
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(ch) = self.peek() {
+            if ch.is_whitespace() {
+                self.pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input[self.pos..].chars().next()
+    }
+
+    fn consume(&mut self, expected: char) -> bool {
+        self.skip_ws();
+        if self.peek() == Some(expected) {
+            self.pos += expected.len_utf8();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_term()?;
+        loop {
+            if self.consume('+') {
+                value += self.parse_term()?;
+            } else if self.consume('-') {
+                value -= self.parse_term()?;
+            } else {
+                return Ok(value);
+            }
+        }
+    }
+
+    fn parse_term(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_factor()?;
+        loop {
+            if self.consume('*') {
+                value *= self.parse_factor()?;
+            } else if self.consume('/') {
+                let divisor = self.parse_factor()?;
+                if divisor.abs() < f64::EPSILON {
+                    return Err("division by zero".to_string());
+                }
+                value /= divisor;
+            } else {
+                return Ok(value);
+            }
+        }
+    }
+
+    fn parse_factor(&mut self) -> Result<f64, String> {
+        self.skip_ws();
+        if self.consume('+') {
+            return self.parse_factor();
+        }
+        if self.consume('-') {
+            return Ok(-self.parse_factor()?);
+        }
+        if self.consume('(') {
+            let value = self.parse_expression()?;
+            if !self.consume(')') {
+                return Err("expected ')'".to_string());
+            }
+            return Ok(value);
+        }
+        self.parse_number()
+    }
+
+    fn parse_number(&mut self) -> Result<f64, String> {
+        self.skip_ws();
+        let start = self.pos;
+        let mut seen_digit = false;
+        let mut seen_dot = false;
+
+        while let Some(ch) = self.peek() {
+            if ch.is_ascii_digit() {
+                seen_digit = true;
+                self.pos += ch.len_utf8();
+            } else if ch == '.' && !seen_dot {
+                seen_dot = true;
+                self.pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        if !seen_digit {
+            return Err("expected number".to_string());
+        }
+
+        self.input[start..self.pos]
+            .parse::<f64>()
+            .map_err(|_| "invalid number".to_string())
+    }
+}
+
 impl Editor {
     pub fn new(settings: Settings) -> Self {
         let (keymap, keymap_errors) = KeymapLookup::from_settings(&settings.keymap);
@@ -1153,6 +1360,9 @@ impl Editor {
             last_inserted_text: None,
             current_inserted_text: String::new(),
             pending_insert_register: false,
+            pending_expression_register: None,
+            expression_register_input: String::new(),
+            expression_register_value: None,
             pending_insert_normal_once: false,
             previous_jump_position: None,
             languages_config: crate::config::load_languages_config(),
@@ -3150,6 +3360,12 @@ impl Editor {
                 .filter(|text| !text.is_empty())
                 .cloned()
                 .map(RegisterContent::Chars),
+            Some('=') => self
+                .expression_register_value
+                .as_ref()
+                .filter(|text| !text.is_empty())
+                .cloned()
+                .map(RegisterContent::Chars),
             _ => self.registers.get_content(register),
         }
     }
@@ -3466,6 +3682,62 @@ impl Editor {
         }
 
         self.insert_text_at_cursor(&text);
+        true
+    }
+
+    /// Begin collecting expression-register input.
+    pub fn start_expression_register(&mut self, target: ExpressionRegisterTarget) {
+        self.pending_expression_register = Some(target);
+        self.expression_register_input.clear();
+        self.set_status("=");
+    }
+
+    /// Append one typed character to the expression-register prompt.
+    pub fn push_expression_register_char(&mut self, ch: char) {
+        self.expression_register_input.push(ch);
+        self.set_status(format!("={}", self.expression_register_input));
+    }
+
+    /// Remove the last character from the expression-register prompt.
+    pub fn pop_expression_register_char(&mut self) {
+        self.expression_register_input.pop();
+        self.set_status(format!("={}", self.expression_register_input));
+    }
+
+    /// Cancel expression-register input and clear the pending target.
+    pub fn cancel_expression_register(&mut self) {
+        self.pending_expression_register = None;
+        self.expression_register_input.clear();
+        self.input_state.selected_register = None;
+        self.clear_status();
+    }
+
+    /// Evaluate the pending expression and route the result to normal/insert behavior.
+    pub fn submit_expression_register(&mut self) -> bool {
+        let Some(target) = self.pending_expression_register.take() else {
+            return false;
+        };
+        let expression = std::mem::take(&mut self.expression_register_input);
+        let result = match evaluate_expression_register(&expression) {
+            Ok(result) => result,
+            Err(err) => {
+                self.input_state.selected_register = None;
+                self.set_status(format!("Expression error: {}", err));
+                return false;
+            }
+        };
+
+        self.expression_register_value = Some(result.clone());
+        match target {
+            ExpressionRegisterTarget::Normal => {
+                self.input_state.selected_register = Some('=');
+                self.set_status(format!("={}", expression));
+            }
+            ExpressionRegisterTarget::Insert => {
+                self.insert_text_at_cursor(&result);
+                self.clear_status();
+            }
+        }
         true
     }
 

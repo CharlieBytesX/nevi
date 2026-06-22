@@ -57,7 +57,9 @@ fn finder_preview_match_ranges(line: &str, query: &str) -> Vec<(usize, usize)> {
 
 use crate::commands::{parse_command, Command, CommandPopupMode, CommandResult};
 use crate::config::{CommandModeAction, LeaderAction};
-use crate::editor::{Editor, LspAction, Mode, Pane, PaneDirection, SplitLayout};
+use crate::editor::{
+    Editor, ExpressionRegisterTarget, LspAction, Mode, Pane, PaneDirection, SplitLayout,
+};
 use crate::input::{
     InsertPosition, KeyAction, Operator, TextObject, TextObjectModifier, TextObjectType,
 };
@@ -6248,6 +6250,25 @@ pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
         return;
     }
 
+    if editor.pending_expression_register.is_some() {
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('[')) => {
+                editor.cancel_expression_register();
+            }
+            (KeyModifiers::NONE, KeyCode::Enter) => {
+                editor.submit_expression_register();
+            }
+            (KeyModifiers::NONE, KeyCode::Backspace) => {
+                editor.pop_expression_register_char();
+            }
+            (_, KeyCode::Char(ch)) if !ch.is_control() => {
+                editor.push_expression_register_char(ch);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Handle references picker if active
     if editor.references_picker.is_some() {
         handle_references_picker_key(editor, key);
@@ -6434,6 +6455,10 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
     match action {
         KeyAction::Pending => {
             // Key was consumed, waiting for more input
+            if editor.input_state.selected_register == Some('=') {
+                editor.input_state.selected_register = None;
+                editor.start_expression_register(ExpressionRegisterTarget::Normal);
+            }
         }
 
         KeyAction::Motion(motion, count) => {
@@ -7110,7 +7135,11 @@ fn handle_insert_mode(editor: &mut Editor, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('[')) => {}
             (_, KeyCode::Char(register)) => {
-                editor.insert_register_text(register);
+                if register == '=' {
+                    editor.start_expression_register(ExpressionRegisterTarget::Insert);
+                } else {
+                    editor.insert_register_text(register);
+                }
             }
             _ => {}
         }
@@ -11393,6 +11422,27 @@ mod tests {
     }
 
     #[test]
+    fn normal_expression_register_evaluates_expression_before_paste() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n");
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('='));
+        handle_key(&mut editor, key('1'));
+        handle_key(&mut editor, key('+'));
+        handle_key(&mut editor, key('2'));
+        handle_key(&mut editor, key('*'));
+        handle_key(&mut editor, key('3'));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "x7\n");
+    }
+
+    #[test]
     fn insert_ctrl_a_inserts_previously_inserted_text() {
         let mut editor = Editor::default();
         editor.replace_buffer_content("x\n\n");
@@ -11429,6 +11479,28 @@ mod tests {
         assert_eq!(editor.buffer().content(), "xnevi\n");
         assert_eq!(editor.mode, Mode::Insert);
         assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+    }
+
+    #[test]
+    fn insert_ctrl_r_equals_evaluates_expression_at_cursor() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n");
+
+        handle_key(&mut editor, shift_key('A'));
+        handle_key(&mut editor, ctrl_key('r'));
+        handle_key(&mut editor, key('='));
+        handle_key(&mut editor, key('1'));
+        handle_key(&mut editor, key('0'));
+        handle_key(&mut editor, key('/'));
+        handle_key(&mut editor, key('4'));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
+
+        assert_eq!(editor.buffer().content(), "x2.5\n");
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 4));
     }
 
     #[test]
