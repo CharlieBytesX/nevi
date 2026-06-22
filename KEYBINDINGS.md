@@ -828,6 +828,7 @@ Type `:` to enter command mode. Implemented commands include:
 | `:Themes` | Open theme picker |
 | `:Theme {name}` / `:theme {name}` / `:colorscheme {name}` | Set theme |
 | `:LazyGit` / `:lg` | Open lazygit |
+| `:checkhealth` / `:CheckHealth` / `:Health` | Open editor health report with config, profiling, and LSP summary |
 | `:!{command}` | Run external shell command |
 | `:Terminal` / `:term` | Toggle floating terminal |
 | `:TerminalNew [name]` / `:termnew [name]` | Create floating terminal session |

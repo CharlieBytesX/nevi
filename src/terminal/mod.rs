@@ -4033,11 +4033,11 @@ impl Terminal {
             cursor::MoveTo(rect.x, rect.y)
         )?;
         print!("╭");
-        let title = " Markdown Preview ";
+        let title = format!(" {} ", preview.title);
         let title_start = (rect.width as usize).saturating_sub(title.len()) / 2;
         for i in 1..rect.width.saturating_sub(1) {
             if i as usize == title_start {
-                print!("{title}");
+                print!("{}", title);
             } else if i as usize > title_start && (i as usize) < title_start + title.len() {
                 continue;
             } else {
@@ -9448,6 +9448,10 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             editor.open_keymaps_picker();
             CommandResult::Ok
         }
+        Command::CheckHealth => {
+            editor.open_health_report();
+            CommandResult::Ok
+        }
 
         Command::Marks => {
             editor.open_finder_marks();
@@ -9794,6 +9798,26 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn checkhealth_command_opens_health_report_preview() {
+        let mut editor = Editor::default();
+
+        execute_command(&mut editor, Command::CheckHealth);
+
+        let preview = editor.markdown_preview.as_ref().expect("health preview");
+        assert_eq!(preview.title, "Health");
+        let text = preview
+            .lines
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Nevi Health"));
+        assert!(text.contains("Configuration"));
+        assert!(text.contains("Performance"));
+        assert!(text.contains("LSP"));
     }
 
     #[test]
