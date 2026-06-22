@@ -225,7 +225,7 @@ Press `<Space>` by itself to show available leader continuations. Set `[keymap] 
 `Ctrl+w v` (vsplit), `Ctrl+w s` (hsplit), `Ctrl+w q` (close), `Ctrl+w h/j/k/l` or `Ctrl+h/j/k/l` (navigate), `Ctrl+w w/W` (next/previous), `Ctrl+w =` (equalize), `Ctrl+w r/R` (rotate), `Ctrl+w x` (exchange)
 
 ### And More
-Visual mode (`v/V/Ctrl+v`), macros (`q{a-z}/@{a-z}`), marks (`m{a-z}/'`), read-only registers (`"%`, `":`, `"#`, `".`), insert helpers (`Ctrl+t/Ctrl+d/Ctrl+a/Ctrl+r/Ctrl+o`), replace mode (`R`)
+Visual mode (`v/V/Ctrl+v`), macros (`q{a-z}/@{a-z}`), marks (`m{a-z}/'`), read-only/expression registers (`"%`, `":`, `"#`, `".`, `"=`), insert helpers (`Ctrl+t/Ctrl+d/Ctrl+a/Ctrl+r/Ctrl+o`), replace mode (`R`)
 
 > **Missing a keybind?** Check [KEYBINDINGS.md](KEYBINDINGS.md) for the full list of what's implemented. If you don't see the one you want, take a look at the [keybind roadmap](KEYBINDS_ROADMAP.md) to see if it's already planned — and if it's not, [open an issue](https://github.com/anthonyamaro15/nevi/issues) to request it (PRs welcome too).
 

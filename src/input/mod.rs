@@ -439,7 +439,7 @@ impl InputState {
         if self.pending_register_select {
             self.pending_register_select = false;
             if let KeyCode::Char(c) = key.code {
-                // Valid register names: a-z, A-Z, 0-9, ", -, +, *, _, /, %, :, #, .
+                // Valid register names: a-z, A-Z, 0-9, ", -, +, *, _, /, %, :, #, ., =
                 if c.is_ascii_alphabetic()
                     || c.is_ascii_digit()
                     || c == '"'
@@ -452,6 +452,7 @@ impl InputState {
                     || c == ':'
                     || c == '#'
                     || c == '.'
+                    || c == '='
                 {
                     self.selected_register = Some(c);
                     return KeyAction::Pending;

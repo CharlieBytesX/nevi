@@ -1006,6 +1006,7 @@ fn default_config_template() -> &'static str {
 # "%               - Current filename
 # ":               - Last command
 # "#               - Alternate filename
+# "=               - Expression register
 #
 # ----------------------------------------------------------------------------
 # LEADER MAPPINGS (default: Space)

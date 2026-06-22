@@ -4,7 +4,7 @@ Nevi aims for full vim/neovim keybind compatibility. Defaults follow Neovim, and
 keybinds are configurable — sensible defaults out of the box, overridable to your
 own taste.
 
-**Status: 283 keybinds implemented, 1 planned.**
+**Status: 284 keybinds implemented, 0 planned.**
 
 This file tracks what's **planned** (not yet implemented). For the full list of
 keybinds that already work, see [KEYBINDINGS.md](KEYBINDINGS.md).
@@ -17,8 +17,7 @@ keybinds that already work, see [KEYBINDINGS.md](KEYBINDINGS.md).
 
 ## Planned
 
-### Registers (read-only)
-- `"=` — expression register
+No planned keybinds are currently tracked.
 
 ---
 

@@ -487,6 +487,7 @@ Registers are like named clipboards. Prefix operations with `"{register}`.
 | `"%` | Current filename |
 | `":` | Last command |
 | `"#` | Alternate filename |
+| `"=` | Expression register |
 
 > **Examples:**
 > - `"ayy` - Yank line into register `a`
@@ -494,6 +495,9 @@ Registers are like named clipboards. Prefix operations with `"{register}`.
 > - `"+y` - Yank to system clipboard
 > - `"+p` - Paste from system clipboard
 > - `"_dd` - Delete line without saving to any register
+> - `"=1+2*3<Enter>p` - Paste evaluated expression result
+
+> **Expression register:** supports arithmetic (`+`, `-`, `*`, `/`, parentheses) and quoted string literals.
 
 ---
 
