@@ -7660,7 +7660,9 @@ fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
         (KeyModifiers::NONE, KeyCode::Right) => {
             editor.command_line.move_right();
         }
-        (KeyModifiers::CONTROL, KeyCode::Char('a')) | (KeyModifiers::NONE, KeyCode::Home) => {
+        (KeyModifiers::CONTROL, KeyCode::Char('a'))
+        | (KeyModifiers::CONTROL, KeyCode::Char('b'))
+        | (KeyModifiers::NONE, KeyCode::Home) => {
             editor.command_line.move_to_start();
         }
         (KeyModifiers::CONTROL, KeyCode::Char('e')) | (KeyModifiers::NONE, KeyCode::End) => {
@@ -9618,6 +9620,31 @@ mod tests {
 
     fn numbered_lines(count: usize) -> Vec<String> {
         (1..=count).map(|line| format!("line {}", line)).collect()
+    }
+
+    #[test]
+    fn command_ctrl_b_moves_to_beginning_of_command_line() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("write buffer");
+
+        handle_key(&mut editor, ctrl_key('b'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "write buffer");
+        assert_eq!(editor.command_line.cursor, 0);
+    }
+
+    #[test]
+    fn command_ctrl_e_moves_to_end_of_command_line() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("write buffer");
+        editor.command_line.cursor = 2;
+
+        handle_key(&mut editor, ctrl_key('e'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "write buffer");
+        assert_eq!(editor.command_line.cursor, "write buffer".chars().count());
     }
 
     #[test]

@@ -1140,6 +1140,8 @@ fn default_config_template() -> &'static str {
 # ----------------------------------------------------------------------------
 # COMMAND MODE (while typing `:`)
 # ----------------------------------------------------------------------------
+# Ctrl+b           - Move to beginning of command line
+# Ctrl+e           - Move to end of command line
 # Ctrl+r           - Toggle command history window
 # Tab              - Accept selected command completion
 # Shift+Tab        - Accept previous completion

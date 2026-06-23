@@ -109,6 +109,7 @@ fn mode_tag(mode: &str) -> &str {
         "insert" => "i",
         "leader" => "leader",
         "commands" => "cmd",
+        "cmdline" => "cmdline",
         "finder" => "finder",
         "terminal" => "term",
         "text_objects" => "text-obj",
@@ -152,16 +153,16 @@ pub fn keymap_finder_items(keymap: &KeymapSettings) -> Vec<FinderItem> {
     entries.iter().map(entry_to_item).collect()
 }
 
-/// True if the user has remapped `key` in the given mode (normal/visual/insert),
-/// so the built-in default row should be replaced by the user's remap.
+/// True if the user has remapped `key` in the given mode, so the built-in
+/// default row should be replaced by the user's remap.
 fn is_remapped(keymap: &KeymapSettings, mode: &str, key: &str) -> bool {
-    let remaps = match mode {
-        "normal" => &keymap.normal,
-        "visual" => &keymap.visual,
-        "insert" => &keymap.insert,
-        _ => return false,
-    };
-    remaps.iter().any(|entry| entry.from == key)
+    match mode {
+        "normal" => keymap.normal.iter().any(|entry| entry.from == key),
+        "visual" => keymap.visual.iter().any(|entry| entry.from == key),
+        "insert" => keymap.insert.iter().any(|entry| entry.from == key),
+        "cmdline" => keymap.command_mappings.iter().any(|entry| entry.key == key),
+        _ => false,
+    }
 }
 
 /// Rows for the user's own normal/visual/insert remaps, from the live config.
@@ -368,6 +369,27 @@ vim_default = true
                 .iter()
                 .any(|item| item.display.contains("<C-r>") && item.display.contains("history")),
             "command-line UX mappings (e.g. <C-r> history) should appear"
+        );
+    }
+
+    #[test]
+    fn picker_includes_builtin_command_line_editing_keys() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("cmdline")
+                    && item.display.contains("<C-b>")
+                    && item.display.contains("beginning")
+            }),
+            "command-line Ctrl+b should appear in :Keymaps"
+        );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("cmdline")
+                    && item.display.contains("<C-e>")
+                    && item.display.contains("end")
+            }),
+            "command-line Ctrl+e should appear in :Keymaps"
         );
     }
 

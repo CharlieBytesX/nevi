@@ -762,6 +762,19 @@ See [Leader Key Mappings](#leader-key-mappings) for adding files and jumping to 
 
 Type `:` to enter command mode. Implemented commands include:
 
+### Command-Line Editing
+
+While typing an Ex command after `:`.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+b` | Move to beginning of command line |
+| `Ctrl+e` | Move to end of command line |
+| `Ctrl+r` | Toggle command history window |
+| `Tab` | Accept selected command completion |
+| `Shift+Tab` | Accept previous completion |
+| `Ctrl+n` / `Ctrl+p` | Select next / previous popup item |
+
 ### File Operations
 
 | Command | Action |

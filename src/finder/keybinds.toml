@@ -1929,6 +1929,24 @@ status = "implemented"
 vim_default = true
 
 # ============================================================================
+# COMMAND-LINE EDITING (while typing `:`)
+# ============================================================================
+
+[[cmdline.editing]]
+key = "<C-b>"
+action = "command_line_begin"
+desc = "Move to beginning of command line"
+status = "implemented"
+vim_default = true
+
+[[cmdline.editing]]
+key = "<C-e>"
+action = "command_line_end"
+desc = "Move to end of command line"
+status = "implemented"
+vim_default = true
+
+# ============================================================================
 # COMMAND MODE (Ex commands)
 # ============================================================================
 
