@@ -7690,9 +7690,9 @@ fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
             }
         }
 
-        // Clear line
+        // Delete from cursor to start
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
-            editor.command_line.begin_prompt();
+            editor.command_line.delete_to_start();
         }
 
         // Regular character - accept any modifier for printable chars
@@ -9674,6 +9674,19 @@ mod tests {
         assert_eq!(editor.mode, Mode::Command);
         assert_eq!(editor.command_line.input, "write ");
         assert_eq!(editor.command_line.cursor, "write ".chars().count());
+    }
+
+    #[test]
+    fn command_ctrl_u_deletes_from_command_line_cursor_to_start() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("write foo bar");
+        editor.command_line.cursor = "write foo ".chars().count();
+
+        handle_key(&mut editor, ctrl_key('u'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "bar");
+        assert_eq!(editor.command_line.cursor, 0);
     }
 
     #[test]
