@@ -399,6 +399,14 @@ vim_default = true
             }),
             "command-line Ctrl+w should appear in :Keymaps"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("cmdline")
+                    && item.display.contains("<C-u>")
+                    && item.display.contains("beginning")
+            }),
+            "command-line Ctrl+u should appear in :Keymaps"
+        );
     }
 
     #[test]

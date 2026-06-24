@@ -1239,6 +1239,18 @@ impl CommandLine {
         }
     }
 
+    /// Delete from the cursor back to the start of the command line.
+    pub fn delete_to_start(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        let end_byte = self.char_to_byte_index(self.cursor);
+        self.input.replace_range(0..end_byte, "");
+        self.cursor = 0;
+        self.on_input_edited();
+    }
+
     /// Move cursor left
     pub fn move_left(&mut self) {
         if self.cursor > 0 {
