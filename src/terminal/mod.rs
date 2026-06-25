@@ -103,6 +103,8 @@ enum HoverLineType {
 struct WrapSegment {
     /// Start column in the original line
     start_col: usize,
+    /// Number of display characters inserted before source text on this segment.
+    virtual_prefix_chars: usize,
     /// The text content of this segment
     text: String,
     /// Whether this is the first segment (shows line number)
@@ -404,6 +406,7 @@ fn calculate_wrap_segments(
     if max_width == 0 {
         return vec![WrapSegment {
             start_col: 0,
+            virtual_prefix_chars: 0,
             text: line.to_string(),
             is_first: true,
         }];
@@ -415,6 +418,7 @@ fn calculate_wrap_segments(
     if text_display_width(line, tab_width) <= max_width {
         return vec![WrapSegment {
             start_col: 0,
+            virtual_prefix_chars: 0,
             text: line.to_string(),
             is_first: true,
         }];
@@ -455,6 +459,7 @@ fn calculate_wrap_segments(
             let text: String = std::iter::once(chars[current_col]).collect();
             segments.push(WrapSegment {
                 start_col: current_col,
+                virtual_prefix_chars: segment_indent.chars().count(),
                 text: format!("{}{}", segment_indent, text),
                 is_first,
             });
@@ -483,6 +488,7 @@ fn calculate_wrap_segments(
 
             segments.push(WrapSegment {
                 start_col: current_col,
+                virtual_prefix_chars: segment_indent.chars().count(),
                 text: format!("{}{}", segment_indent, text),
                 is_first,
             });
@@ -494,12 +500,34 @@ fn calculate_wrap_segments(
     if segments.is_empty() {
         segments.push(WrapSegment {
             start_col: 0,
+            virtual_prefix_chars: 0,
             text: String::new(),
             is_first: true,
         });
     }
 
     segments
+}
+
+fn source_col_for_wrap_segment_position(
+    start_col: usize,
+    virtual_prefix_chars: usize,
+    visual_idx: usize,
+) -> Option<usize> {
+    if visual_idx < virtual_prefix_chars {
+        None
+    } else {
+        Some(start_col + visual_idx - virtual_prefix_chars)
+    }
+}
+
+#[cfg(test)]
+fn source_col_for_wrap_segment_char(segment: &WrapSegment, visual_idx: usize) -> Option<usize> {
+    source_col_for_wrap_segment_position(
+        segment.start_col,
+        segment.virtual_prefix_chars,
+        visual_idx,
+    )
 }
 
 /// Terminal handler responsible for rendering and input
@@ -1179,6 +1207,7 @@ impl Terminal {
                     segment_text,
                     file_line,
                     segment.start_col,
+                    segment.virtual_prefix_chars,
                     &highlights,
                     visual_range,
                     &editor.mode,
@@ -1727,6 +1756,7 @@ impl Terminal {
         text: &str,
         line_num: usize,
         col_offset: usize,
+        virtual_prefix_chars: usize,
         highlights: &[HighlightSpan],
         visual_range: Option<(usize, usize, usize, usize)>,
         mode: &Mode,
@@ -1767,48 +1797,56 @@ impl Terminal {
         let mut rendered_cols = 0;
 
         for (i, ch) in chars.iter().enumerate() {
-            // Calculate the actual column in the original line
-            let actual_col = col_offset + i;
+            // Calculate the actual column in the original line. Wrapped continuation
+            // indentation is virtual text, so it has no source column.
+            let source_col =
+                source_col_for_wrap_segment_position(col_offset, virtual_prefix_chars, i);
 
             // Check for visual selection
-            let in_visual = if let Some((start_line, start_col, end_line, end_col)) = visual_range {
-                match mode {
-                    Mode::Visual => {
-                        if line_num > start_line && line_num < end_line {
-                            true
-                        } else if line_num == start_line && line_num == end_line {
-                            actual_col >= start_col && actual_col <= end_col
-                        } else if line_num == start_line {
-                            actual_col >= start_col
-                        } else if line_num == end_line {
-                            actual_col <= end_col
-                        } else {
-                            false
+            let in_visual =
+                if let (Some(actual_col), Some((start_line, start_col, end_line, end_col))) =
+                    (source_col, visual_range)
+                {
+                    match mode {
+                        Mode::Visual => {
+                            if line_num > start_line && line_num < end_line {
+                                true
+                            } else if line_num == start_line && line_num == end_line {
+                                actual_col >= start_col && actual_col <= end_col
+                            } else if line_num == start_line {
+                                actual_col >= start_col
+                            } else if line_num == end_line {
+                                actual_col <= end_col
+                            } else {
+                                false
+                            }
                         }
+                        Mode::VisualLine => line_num >= start_line && line_num <= end_line,
+                        Mode::VisualBlock => {
+                            line_num >= start_line
+                                && line_num <= end_line
+                                && actual_col >= start_col
+                                && actual_col <= end_col
+                        }
+                        _ => false,
                     }
-                    Mode::VisualLine => line_num >= start_line && line_num <= end_line,
-                    Mode::VisualBlock => {
-                        line_num >= start_line
-                            && line_num <= end_line
-                            && actual_col >= start_col
-                            && actual_col <= end_col
-                    }
-                    _ => false,
-                }
-            } else {
-                false
-            };
+                } else {
+                    false
+                };
 
             // Check if in search match
-            let is_search = in_search_match(actual_col);
+            let is_search = source_col.map_or(false, in_search_match);
 
-            let diag_at_col = diagnostic_at_col(diagnostics, line_num, actual_col);
+            let diag_at_col = source_col
+                .and_then(|actual_col| diagnostic_at_col(diagnostics, line_num, actual_col));
 
             // Find syntax highlight for this position
-            let syntax_style = highlights
-                .iter()
-                .find(|h| actual_col >= h.start_col && actual_col < h.end_col)
-                .map(|h| h.style);
+            let syntax_style = source_col.and_then(|actual_col| {
+                highlights
+                    .iter()
+                    .find(|h| actual_col >= h.start_col && actual_col < h.end_col)
+                    .map(|h| h.style)
+            });
             let syntax_color = syntax_style.map(|style| style.fg);
 
             // Check if within a hint diagnostic (unused variable/import) - grey out the text
@@ -9826,6 +9864,36 @@ mod tests {
         assert!(segments
             .iter()
             .all(|segment| super::text_display_width(&segment.text, 4) <= 5));
+    }
+
+    #[test]
+    fn wrapped_continuation_indent_does_not_shift_source_columns() {
+        let line = "    url: 'https://services.arcgis.com/EDxZDh4hQQ1a9KvA/arcgis/rest/services/whippoints/FeatureServer/0',";
+        let segments = super::calculate_wrap_segments(line, 80, true, 4);
+        let continuation = segments
+            .iter()
+            .find(|segment| !segment.is_first)
+            .expect("long URL should wrap");
+
+        assert_eq!(continuation.virtual_prefix_chars, 4);
+        assert_eq!(
+            super::source_col_for_wrap_segment_char(
+                continuation,
+                continuation.virtual_prefix_chars
+            ),
+            Some(continuation.start_col)
+        );
+        assert_eq!(
+            super::source_col_for_wrap_segment_char(
+                continuation,
+                continuation.virtual_prefix_chars + 1
+            ),
+            Some(continuation.start_col + 1)
+        );
+        assert_eq!(
+            super::source_col_for_wrap_segment_char(continuation, 0),
+            None
+        );
     }
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
