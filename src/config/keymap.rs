@@ -44,6 +44,8 @@ pub enum CommandModeAction {
     InsertRegister,
     /// Show available command-line completions
     ListCompletions,
+    /// Complete the longest common command-line completion prefix
+    CompleteLongestCommonPrefix,
     /// Accept current completion/history selection
     Complete,
     /// Move selection backward and accept completion
@@ -374,6 +376,7 @@ fn parse_command_mode_action(action: &str) -> Option<CommandModeAction> {
         "history_toggle" => Some(CommandModeAction::HistoryToggle),
         "insert_register" => Some(CommandModeAction::InsertRegister),
         "list_completions" => Some(CommandModeAction::ListCompletions),
+        "complete_longest_common_prefix" => Some(CommandModeAction::CompleteLongestCommonPrefix),
         "complete" => Some(CommandModeAction::Complete),
         "complete_prev" => Some(CommandModeAction::CompletePrev),
         "popup_next" => Some(CommandModeAction::PopupNext),

@@ -7630,6 +7630,9 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
         CommandModeAction::ListCompletions => {
             editor.command_line.list_completions();
         }
+        CommandModeAction::CompleteLongestCommonPrefix => {
+            editor.command_line.complete_longest_common_prefix();
+        }
         CommandModeAction::Complete => {
             if editor.command_line.popup_mode == CommandPopupMode::History {
                 editor.command_line.accept_history_popup_selection();
@@ -9783,6 +9786,19 @@ mod tests {
             .suggestions
             .iter()
             .any(|item| item.command == "w"));
+    }
+
+    #[test]
+    fn command_ctrl_l_completes_longest_common_command_prefix() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("Term");
+
+        handle_key(&mut editor, ctrl_key('l'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "Terminal");
+        assert_eq!(editor.command_line.cursor, "Terminal".chars().count());
+        assert_eq!(editor.command_line.popup_mode, CommandPopupMode::Completion);
     }
 
     #[test]

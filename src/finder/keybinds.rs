@@ -382,6 +382,12 @@ vim_default = true
             }),
             "command-line UX mappings (e.g. <C-d> completions) should appear"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("<C-l>") && item.display.contains("common command prefix")
+            }),
+            "command-line UX mappings (e.g. <C-l> common prefix completion) should appear"
+        );
     }
 
     #[test]

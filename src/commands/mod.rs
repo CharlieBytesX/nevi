@@ -775,6 +775,36 @@ fn split_input_segments(input: &str) -> (&str, &str, &str) {
     (&input[..start], &input[start..end], &input[end..])
 }
 
+fn common_prefix_preserving_left_case(left: &str, right: &str) -> String {
+    let mut end_byte = 0;
+
+    for ((left_idx, left_ch), right_ch) in left.char_indices().zip(right.chars()) {
+        if left_ch.eq_ignore_ascii_case(&right_ch) {
+            end_byte = left_idx + left_ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    left[..end_byte].to_string()
+}
+
+fn longest_common_command_prefix(suggestions: &[CommandSuggestion]) -> String {
+    let Some(first) = suggestions.first() else {
+        return String::new();
+    };
+
+    let mut prefix = first.command.to_string();
+    for suggestion in suggestions.iter().skip(1) {
+        prefix = common_prefix_preserving_left_case(&prefix, suggestion.command);
+        if prefix.is_empty() {
+            break;
+        }
+    }
+
+    prefix
+}
+
 fn command_history_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -1366,6 +1396,42 @@ impl CommandLine {
             self.popup_mode = CommandPopupMode::Completion;
             true
         }
+    }
+
+    /// Complete to the longest common command prefix across current matches.
+    pub fn complete_longest_common_prefix(&mut self) -> bool {
+        self.refresh_command_suggestions();
+        self.history_popup_items.clear();
+        self.history_popup_index = 0;
+
+        if self.suggestions.is_empty() {
+            self.popup_mode = CommandPopupMode::None;
+            return false;
+        }
+
+        self.popup_mode = CommandPopupMode::Completion;
+        let (prefix, token, suffix) = split_input_segments(&self.input);
+        if token.is_empty() {
+            return false;
+        }
+
+        let matches = command_suggestions_for_token(token, COMMAND_SPECS.len());
+        let common_prefix = longest_common_command_prefix(&matches);
+        if common_prefix.is_empty() || common_prefix == token {
+            return false;
+        }
+
+        let prefix = prefix.to_string();
+        let suffix = suffix.to_string();
+        self.input = format!("{prefix}{common_prefix}{suffix}");
+        self.cursor = prefix.chars().count() + common_prefix.chars().count();
+        self.refresh_command_suggestions();
+        if self.suggestions.is_empty() {
+            self.popup_mode = CommandPopupMode::None;
+        } else {
+            self.popup_mode = CommandPopupMode::Completion;
+        }
+        true
     }
 
     /// Move selection down in current popup.
