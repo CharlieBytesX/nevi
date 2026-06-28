@@ -8789,7 +8789,7 @@ fn execute_explorer_action(editor: &mut Editor) {
                 match std::fs::create_dir_all(&new_path) {
                     Ok(_) => {
                         editor.set_status(format!("Created: {}", new_path.display()));
-                        editor.explorer.refresh();
+                        editor.explorer.refresh_and_select_path(&new_path);
                         editor.refresh_explorer_git_statuses();
                     }
                     Err(e) => {
@@ -8804,7 +8804,7 @@ fn execute_explorer_action(editor: &mut Editor) {
                 match std::fs::File::create(&new_path) {
                     Ok(_) => {
                         editor.set_status(format!("Created: {}", new_path.display()));
-                        editor.explorer.refresh();
+                        editor.explorer.refresh_and_select_path(&new_path);
                         editor.refresh_explorer_git_statuses();
                         // Auto-open the newly created file
                         if let Err(e) = editor.open_file(new_path.clone()) {
@@ -8836,7 +8836,7 @@ fn execute_explorer_action(editor: &mut Editor) {
                 match std::fs::rename(&old_path, &new_path) {
                     Ok(_) => {
                         editor.set_status(format!("Renamed to: {}", new_path.display()));
-                        editor.explorer.refresh();
+                        editor.explorer.refresh_and_select_path(&new_path);
                         editor.refresh_explorer_git_statuses();
                     }
                     Err(e) => {
@@ -8933,7 +8933,7 @@ fn execute_explorer_paste(editor: &mut Editor) {
             if matches!(clipboard.op, ClipboardOp::Cut) {
                 editor.explorer.clear_clipboard();
             }
-            editor.explorer.refresh();
+            editor.explorer.refresh_and_select_path(&dest_path);
             editor.refresh_explorer_git_statuses();
         }
         Err(e) => {
