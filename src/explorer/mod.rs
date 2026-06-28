@@ -339,6 +339,18 @@ impl FileExplorer {
 
     /// Refresh the tree (reload from filesystem)
     pub fn refresh(&mut self) {
+        let selected_path = self.selected_path().cloned();
+        let fallback_index = self.selected;
+        self.refresh_with_selection(selected_path.as_deref(), fallback_index);
+    }
+
+    /// Refresh the tree and select `path` if it is visible afterward.
+    pub fn refresh_and_select_path(&mut self, path: &Path) {
+        let fallback_index = self.selected;
+        self.refresh_with_selection(Some(path), fallback_index);
+    }
+
+    fn refresh_with_selection(&mut self, preferred_path: Option<&Path>, fallback_index: usize) {
         if let Some(root) = self.root.clone() {
             let mut root_node = TreeNode::new(root.clone(), 0);
             root_node.load_children();
@@ -352,12 +364,19 @@ impl FileExplorer {
             }
 
             self.rebuild_flat_view();
+            self.restore_selection(preferred_path, fallback_index);
+        }
+    }
 
-            // Ensure selected is in bounds
-            if self.selected >= self.flat_view.len() {
-                self.selected = self.flat_view.len().saturating_sub(1);
+    fn restore_selection(&mut self, preferred_path: Option<&Path>, fallback_index: usize) {
+        if let Some(path) = preferred_path {
+            if let Some(idx) = self.flat_view.iter().position(|node| node.path == path) {
+                self.selected = idx;
+                return;
             }
         }
+
+        self.selected = fallback_index.min(self.flat_view.len().saturating_sub(1));
     }
 
     /// Rebuild git status markers from the current repository state.
@@ -1509,6 +1528,69 @@ mod tests {
             .flat_view
             .iter()
             .any(|node| node.path == store.join("new.ts")));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refresh_preserves_selected_path_when_items_are_inserted_above() {
+        let root = unique_temp_dir("nevi_explorer_refresh_selection");
+        std::fs::create_dir_all(&root).expect("create root");
+        let selected = root.join("b.rs");
+        std::fs::write(&selected, "").expect("write selected file");
+        std::fs::write(root.join("c.rs"), "").expect("write trailing file");
+
+        let mut explorer = FileExplorer::new();
+        explorer.set_root(root.clone());
+        select_path(&mut explorer, &selected);
+
+        std::fs::write(root.join("a.rs"), "").expect("write inserted file");
+        explorer.refresh();
+
+        assert_eq!(explorer.selected_path(), Some(&selected));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refresh_selects_nearby_row_when_selected_path_disappears() {
+        let root = unique_temp_dir("nevi_explorer_refresh_missing_selection");
+        std::fs::create_dir_all(&root).expect("create root");
+        let before = root.join("a.rs");
+        let removed = root.join("b.rs");
+        let after = root.join("c.rs");
+        std::fs::write(&before, "").expect("write before file");
+        std::fs::write(&removed, "").expect("write removed file");
+        std::fs::write(&after, "").expect("write after file");
+
+        let mut explorer = FileExplorer::new();
+        explorer.set_root(root.clone());
+        select_path(&mut explorer, &removed);
+
+        std::fs::remove_file(&removed).expect("remove selected file");
+        explorer.refresh();
+
+        assert_eq!(explorer.selected_path(), Some(&after));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn refresh_and_select_path_selects_newly_visible_target() {
+        let root = unique_temp_dir("nevi_explorer_refresh_target_selection");
+        std::fs::create_dir_all(&root).expect("create root");
+        let existing = root.join("a.rs");
+        let target = root.join("b.rs");
+        std::fs::write(&existing, "").expect("write existing file");
+
+        let mut explorer = FileExplorer::new();
+        explorer.set_root(root.clone());
+        select_path(&mut explorer, &existing);
+
+        std::fs::write(&target, "").expect("write target file");
+        explorer.refresh_and_select_path(&target);
+
+        assert_eq!(explorer.selected_path(), Some(&target));
 
         let _ = std::fs::remove_dir_all(&root);
     }
