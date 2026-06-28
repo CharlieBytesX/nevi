@@ -394,6 +394,12 @@ vim_default = true
             }),
             "command-line UX mappings (e.g. <C-a> all completions) should appear"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("<C-f>") && item.display.contains("command-line window")
+            }),
+            "command-line UX mappings (e.g. <C-f> command-line window) should appear"
+        );
     }
 
     #[test]

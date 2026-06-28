@@ -7636,6 +7636,9 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
         CommandModeAction::InsertAllCompletions => {
             editor.command_line.insert_all_matching_completions();
         }
+        CommandModeAction::OpenCommandLineWindow => {
+            editor.command_line.open_command_line_window();
+        }
         CommandModeAction::Complete => {
             if editor.command_line.popup_mode == CommandPopupMode::History {
                 editor.command_line.accept_history_popup_selection();
@@ -9816,6 +9819,26 @@ mod tests {
         assert_eq!(editor.command_line.input, expected);
         assert_eq!(editor.command_line.cursor, expected.chars().count());
         assert_eq!(editor.command_line.popup_mode, CommandPopupMode::None);
+    }
+
+    #[test]
+    fn command_ctrl_f_opens_command_line_window_without_changing_input() {
+        let mut editor = Editor::default();
+        editor.command_line.history = vec!["write".to_string(), "quit".to_string()];
+        editor.enter_command_mode_with_input("w");
+        editor.command_line.popup_mode = CommandPopupMode::None;
+
+        handle_key(&mut editor, ctrl_key('f'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "w");
+        assert_eq!(editor.command_line.cursor, 1);
+        assert_eq!(editor.command_line.popup_mode, CommandPopupMode::History);
+        assert!(editor
+            .command_line
+            .history_popup_items
+            .iter()
+            .any(|item| item == "write"));
     }
 
     #[test]

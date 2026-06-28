@@ -1383,6 +1383,12 @@ impl CommandLine {
         self.refresh_history_popup();
     }
 
+    /// Open the command-line history window.
+    pub fn open_command_line_window(&mut self) {
+        self.popup_mode = CommandPopupMode::History;
+        self.refresh_history_popup();
+    }
+
     /// Show available command-line completions without accepting one.
     pub fn list_completions(&mut self) -> bool {
         self.refresh_command_suggestions();
