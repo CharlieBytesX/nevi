@@ -726,6 +726,10 @@ When the file explorer sidebar is focused:
 | `Esc` / `Ctrl+[` / `q` | Close explorer |
 | `j` / `Down` | Move down |
 | `k` / `Up` | Move up |
+| `gg` | Move to top |
+| `G` | Move to bottom |
+| `Ctrl+d` / `Ctrl+u` | Move half page down/up |
+| `Ctrl+f` / `Ctrl+b` | Move page down/up |
 | `Enter` | Toggle directory or open file |
 | `l` / `Right` | Expand directory or open file |
 | `h` / `Left` | Collapse directory |

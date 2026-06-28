@@ -146,6 +146,8 @@ pub struct FileExplorer {
     pub search_matches: Vec<usize>,
     /// Current match index in search_matches
     pub current_match: usize,
+    /// Whether explorer is waiting for the second `g` in `gg`.
+    pending_goto_top: bool,
     /// Git status by file and ancestor directory path
     git_statuses: HashMap<PathBuf, GitFileStatus>,
 }
@@ -169,6 +171,7 @@ impl Default for FileExplorer {
             search_cursor: 0,
             search_matches: Vec::new(),
             current_match: 0,
+            pending_goto_top: false,
             git_statuses: HashMap::new(),
         }
     }
@@ -221,6 +224,44 @@ impl FileExplorer {
         if !self.flat_view.is_empty() && self.selected < self.flat_view.len() - 1 {
             self.selected += 1;
         }
+    }
+
+    /// Move selection to the first visible explorer row.
+    pub fn move_to_top(&mut self) {
+        self.selected = 0;
+    }
+
+    /// Move selection to the last visible explorer row.
+    pub fn move_to_bottom(&mut self) {
+        if !self.flat_view.is_empty() {
+            self.selected = self.flat_view.len() - 1;
+        }
+    }
+
+    /// Move selection down by a page-like amount, clamping at the bottom.
+    pub fn move_page_down(&mut self, amount: usize) {
+        if self.flat_view.is_empty() {
+            return;
+        }
+        let max_idx = self.flat_view.len() - 1;
+        self.selected = self.selected.saturating_add(amount).min(max_idx);
+    }
+
+    /// Move selection up by a page-like amount, clamping at the top.
+    pub fn move_page_up(&mut self, amount: usize) {
+        self.selected = self.selected.saturating_sub(amount);
+    }
+
+    /// Start waiting for the second `g` in `gg`.
+    pub fn start_goto_top_sequence(&mut self) {
+        self.pending_goto_top = true;
+    }
+
+    /// Returns true if explorer was waiting for the second `g`, then clears it.
+    pub fn take_goto_top_sequence(&mut self) -> bool {
+        let pending = self.pending_goto_top;
+        self.pending_goto_top = false;
+        pending
     }
 
     /// Get the currently selected path
@@ -1391,6 +1432,51 @@ mod tests {
             .iter()
             .position(|node| node.path == path)
             .expect("path should be visible in explorer");
+    }
+
+    fn explorer_with_flat_rows(count: usize) -> FileExplorer {
+        let root = PathBuf::from("/tmp/nevi-explorer-motion-test");
+        let mut explorer = FileExplorer::new();
+        explorer.flat_view = (0..count)
+            .map(|idx| super::FlatNode {
+                path: root.join(format!("file_{idx}.txt")),
+                name: format!("file_{idx}.txt"),
+                is_dir: false,
+                depth: 1,
+                is_expanded: false,
+            })
+            .collect();
+        explorer
+    }
+
+    #[test]
+    fn explorer_regular_buffer_style_top_and_bottom_motions() {
+        let mut explorer = explorer_with_flat_rows(5);
+        explorer.selected = 2;
+
+        explorer.move_to_top();
+        assert_eq!(explorer.selected, 0);
+
+        explorer.move_to_bottom();
+        assert_eq!(explorer.selected, 4);
+    }
+
+    #[test]
+    fn explorer_page_motions_clamp_to_visible_rows() {
+        let mut explorer = explorer_with_flat_rows(10);
+        explorer.selected = 4;
+
+        explorer.move_page_down(3);
+        assert_eq!(explorer.selected, 7);
+
+        explorer.move_page_down(10);
+        assert_eq!(explorer.selected, 9);
+
+        explorer.move_page_up(4);
+        assert_eq!(explorer.selected, 5);
+
+        explorer.move_page_up(10);
+        assert_eq!(explorer.selected, 0);
     }
 
     #[test]
