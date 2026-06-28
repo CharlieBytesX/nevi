@@ -110,6 +110,7 @@ fn mode_tag(mode: &str) -> &str {
         "leader" => "leader",
         "commands" => "cmd",
         "cmdline" => "cmdline",
+        "explorer" => "expl",
         "finder" => "finder",
         "terminal" => "term",
         "text_objects" => "text-obj",
@@ -399,6 +400,35 @@ vim_default = true
                 item.display.contains("<C-f>") && item.display.contains("command-line window")
             }),
             "command-line UX mappings (e.g. <C-f> command-line window) should appear"
+        );
+    }
+
+    #[test]
+    fn picker_sources_explorer_mode_mappings() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains("gg")
+                    && item.display.contains("top")
+            }),
+            "explorer mappings (e.g. gg top) should appear"
+        );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains("<C-d>")
+                    && item.display.contains("half page")
+            }),
+            "explorer mappings (e.g. Ctrl+d half page) should appear"
+        );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains("p")
+                    && item.display.contains("Paste")
+            }),
+            "existing explorer mappings (e.g. paste) should appear"
         );
     }
 

@@ -1519,6 +1519,172 @@ desc = "Go to harpoon slot 4"
 status = "implemented"
 
 # ============================================================================
+# EXPLORER MODE (File Explorer Sidebar)
+# ============================================================================
+
+[[explorer.navigation]]
+key = "j"
+action = "move_down"
+desc = "Move down"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "k"
+action = "move_up"
+desc = "Move up"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "gg"
+action = "move_to_top"
+desc = "Move to top"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "G"
+action = "move_to_bottom"
+desc = "Move to bottom"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "<C-d>"
+action = "half_page_down"
+desc = "Move half page down"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "<C-u>"
+action = "half_page_up"
+desc = "Move half page up"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "<C-f>"
+action = "page_down"
+desc = "Move page down"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "<C-b>"
+action = "page_up"
+desc = "Move page up"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "Enter"
+action = "toggle_or_open"
+desc = "Toggle directory or open file"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "l"
+action = "expand_or_open"
+desc = "Expand directory or open file"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "h"
+action = "collapse_or_parent"
+desc = "Collapse directory or go to parent"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "Tab"
+action = "toggle_expand"
+desc = "Toggle expand/collapse"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "W"
+action = "collapse_all"
+desc = "Collapse all directories"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "R"
+action = "refresh"
+desc = "Refresh explorer and git status"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "-"
+action = "go_to_parent"
+desc = "Go to parent directory"
+status = "implemented"
+
+[[explorer.navigation]]
+key = "<C-l>"
+action = "focus_editor"
+desc = "Focus editor and keep explorer open"
+status = "implemented"
+
+[[explorer.files]]
+key = "a"
+action = "create"
+desc = "Create file or directory"
+status = "implemented"
+
+[[explorer.files]]
+key = "r"
+action = "rename"
+desc = "Rename selected item"
+status = "implemented"
+
+[[explorer.files]]
+key = "d"
+action = "delete"
+desc = "Delete selected item"
+status = "implemented"
+
+[[explorer.files]]
+key = "c"
+action = "copy"
+desc = "Copy selected item"
+status = "implemented"
+
+[[explorer.files]]
+key = "x"
+action = "cut"
+desc = "Cut selected item"
+status = "implemented"
+
+[[explorer.files]]
+key = "p"
+action = "paste"
+desc = "Paste copied/cut item"
+status = "implemented"
+
+[[explorer.search]]
+key = "/"
+action = "search"
+desc = "Search explorer"
+status = "implemented"
+
+[[explorer.search]]
+key = "n"
+action = "next_match"
+desc = "Next search match"
+status = "implemented"
+
+[[explorer.search]]
+key = "N"
+action = "previous_match"
+desc = "Previous search match"
+status = "implemented"
+
+[[explorer.mode]]
+key = "Esc"
+action = "close"
+desc = "Close explorer"
+status = "implemented"
+
+[[explorer.mode]]
+key = "q"
+action = "close"
+desc = "Close explorer"
+status = "implemented"
+
+# ============================================================================
 # TERMINAL MODE (ALL IMPLEMENTED)
 # ============================================================================
 

@@ -8440,6 +8440,14 @@ fn handle_finder_mode(editor: &mut Editor, key: KeyEvent) {
     ));
 }
 
+fn explorer_visible_rows(editor: &Editor) -> usize {
+    editor.text_rows().saturating_sub(1).max(1)
+}
+
+fn explorer_half_page_rows(editor: &Editor) -> usize {
+    (explorer_visible_rows(editor) / 2).max(1)
+}
+
 fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
     // Handle search input mode
     if editor.explorer.is_searching {
@@ -8523,6 +8531,16 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
         return;
     }
 
+    if editor.explorer.take_goto_top_sequence() {
+        if matches!(
+            (key.modifiers, key.code),
+            (KeyModifiers::NONE, KeyCode::Char('g'))
+        ) {
+            editor.explorer.move_to_top();
+            return;
+        }
+    }
+
     // Handle leader key sequences (same as normal mode)
     if let Some(ref mut sequence) = editor.leader_sequence {
         if key.code == KeyCode::Esc {
@@ -8581,6 +8599,38 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
         // Move up
         (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
             editor.explorer.move_up();
+        }
+
+        // gg - move to top
+        (KeyModifiers::NONE, KeyCode::Char('g')) => {
+            editor.explorer.start_goto_top_sequence();
+        }
+
+        // G - move to bottom
+        (KeyModifiers::SHIFT, KeyCode::Char('G')) | (KeyModifiers::NONE, KeyCode::Char('G')) => {
+            editor.explorer.move_to_bottom();
+        }
+
+        // Ctrl+d / Ctrl+u - half-page movement
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            editor
+                .explorer
+                .move_page_down(explorer_half_page_rows(editor));
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            editor
+                .explorer
+                .move_page_up(explorer_half_page_rows(editor));
+        }
+
+        // Ctrl+f / Ctrl+b - page movement
+        (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
+            editor
+                .explorer
+                .move_page_down(explorer_visible_rows(editor));
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+            editor.explorer.move_page_up(explorer_visible_rows(editor));
         }
 
         // Enter - toggle directory or open file
@@ -9664,6 +9714,7 @@ mod tests {
     use crate::commands::{Command, CommandPopupMode};
     use crate::config::{KeymapEntry, Settings};
     use crate::editor::{Editor, Mode, RegisterContent};
+    use crate::explorer::FlatNode;
     use crate::finder::FinderMode;
     use crate::input::Motion;
     use crate::lsp::types::{CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity};
@@ -9910,6 +9961,44 @@ mod tests {
     }
 
     #[test]
+    fn explorer_g_and_gg_follow_regular_buffer_top_bottom_motions() {
+        let mut editor = editor_with_explorer_rows(5);
+        editor.explorer.selected = 2;
+
+        handle_key(&mut editor, shift_key('G'));
+        assert_eq!(editor.mode, Mode::Explorer);
+        assert_eq!(editor.explorer.selected, 4);
+
+        handle_key(&mut editor, key('g'));
+        assert_eq!(
+            editor.explorer.selected, 4,
+            "single g should wait for a second g"
+        );
+
+        handle_key(&mut editor, key('g'));
+        assert_eq!(editor.explorer.selected, 0);
+    }
+
+    #[test]
+    fn explorer_ctrl_page_motions_follow_regular_buffer_scrolling() {
+        let mut editor = editor_with_explorer_rows(30);
+        editor.set_size(100, 12);
+        editor.explorer.selected = 10;
+
+        handle_key(&mut editor, ctrl_key('d'));
+        assert_eq!(editor.explorer.selected, 14);
+
+        handle_key(&mut editor, ctrl_key('u'));
+        assert_eq!(editor.explorer.selected, 10);
+
+        handle_key(&mut editor, ctrl_key('f'));
+        assert_eq!(editor.explorer.selected, 19);
+
+        handle_key(&mut editor, ctrl_key('b'));
+        assert_eq!(editor.explorer.selected, 10);
+    }
+
+    #[test]
     fn wrap_segments_measure_tabs_by_display_width() {
         let segments = super::calculate_wrap_segments("ab\tcd", 5, true, 4);
 
@@ -9958,6 +10047,22 @@ mod tests {
             .expect("system time")
             .as_nanos();
         std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), nanos))
+    }
+
+    fn editor_with_explorer_rows(count: usize) -> Editor {
+        let mut editor = Editor::default();
+        editor.mode = Mode::Explorer;
+        editor.explorer.visible = true;
+        editor.explorer.flat_view = (0..count)
+            .map(|idx| FlatNode {
+                path: PathBuf::from(format!("/tmp/nevi-explorer-motion/file_{idx}.txt")),
+                name: format!("file_{idx}.txt"),
+                is_dir: false,
+                depth: 1,
+                is_expanded: false,
+            })
+            .collect();
+        editor
     }
 
     fn completion_item(label: &str) -> CompletionItem {
