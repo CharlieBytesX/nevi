@@ -827,6 +827,7 @@ While typing an Ex command after `:`.
 | `Ctrl+w` | Delete word before cursor |
 | `Ctrl+u` | Delete from cursor to beginning of command line |
 | `Ctrl+r {reg}` | Insert register contents |
+| `Ctrl+v` / `Ctrl+q` | Insert the next key literally |
 | `Ctrl+d` | List command-line completions |
 | `Ctrl+l` | Complete longest common command prefix |
 | `Ctrl+a` | Insert all matching command completions |

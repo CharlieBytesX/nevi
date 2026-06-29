@@ -1170,6 +1170,8 @@ pub struct CommandLine {
     pub history_popup_index: usize,
     /// Waiting for a register name after command-line Ctrl+r
     pub pending_register: bool,
+    /// Waiting to insert the next key literally after command-line Ctrl+v/Ctrl+q
+    pub pending_literal: bool,
 }
 
 impl CommandLine {
@@ -1205,6 +1207,7 @@ impl CommandLine {
         self.history_popup_items.clear();
         self.history_popup_index = 0;
         self.pending_register = false;
+        self.pending_literal = false;
     }
 
     /// Convert char index to byte index
@@ -1619,7 +1622,17 @@ impl CommandLine {
 
     /// Get display string (with ':' prefix)
     pub fn display(&self) -> String {
-        format!(":{}", self.input)
+        format!(":{}", display_command_text(&self.input))
+    }
+
+    /// Get the display cursor column for the command-line row.
+    pub fn display_cursor_col(&self) -> usize {
+        let prefix = self
+            .input
+            .chars()
+            .take(self.cursor.min(self.char_count()))
+            .collect::<String>();
+        1 + display_command_text(&prefix).chars().count()
     }
 
     fn on_input_edited(&mut self) {
@@ -1724,6 +1737,22 @@ impl CommandLine {
         let mut contents = self.history.join("\n");
         contents.push('\n');
         let _ = fs::write(path, contents);
+    }
+}
+
+fn display_command_text(input: &str) -> String {
+    input.chars().map(display_command_char).collect()
+}
+
+fn display_command_char(ch: char) -> String {
+    let code = ch as u32;
+    if code == 0x7f {
+        "^?".to_string()
+    } else if code <= 0x1f {
+        let visible = char::from_u32(code + 0x40).unwrap_or('?');
+        format!("^{visible}")
+    } else {
+        ch.to_string()
     }
 }
 
