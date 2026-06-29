@@ -9583,6 +9583,14 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             editor.open_health_report();
             CommandResult::Ok
         }
+        Command::ConfigOpen => match editor.open_user_config_file() {
+            Ok(path) => CommandResult::Message(format!("Opened config: {}", path.display())),
+            Err(message) => CommandResult::Error(message),
+        },
+        Command::ConfigDefaults => {
+            editor.open_config_defaults_preview();
+            CommandResult::Ok
+        }
 
         Command::Marks => {
             editor.open_finder_marks();
@@ -10510,6 +10518,31 @@ mod tests {
         assert!(text.contains("Configuration"));
         assert!(text.contains("Performance"));
         assert!(text.contains("LSP"));
+    }
+
+    #[test]
+    fn configdefaults_command_opens_default_config_preview() {
+        let mut editor = Editor::default();
+
+        execute_command(
+            &mut editor,
+            crate::commands::parse_command("ConfigDefaults"),
+        );
+
+        let preview = editor
+            .markdown_preview
+            .as_ref()
+            .expect("config defaults preview");
+        assert_eq!(preview.title, "Config Defaults");
+        let text = preview
+            .lines
+            .iter()
+            .map(|line| line.plain_text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("# Nevi Configuration"));
+        assert!(text.contains("show_leader_popup"));
+        assert!(text.contains("explorer"));
     }
 
     #[test]

@@ -1403,23 +1403,37 @@ fn default_config_template() -> &'static str {
 "##
 }
 
-/// Ensure config directory and template file exist
-fn ensure_config_exists() {
+/// Latest generated config template text.
+pub fn default_config_template_text() -> &'static str {
+    default_config_template()
+}
+
+/// Ensure config directory and template file exist, returning the config path.
+pub fn ensure_config_file_exists() -> Result<PathBuf, String> {
     let Some(path) = config_path() else {
-        return;
+        return Err("Could not determine config path".to_string());
     };
 
     // Create config directory if it doesn't exist
     if let Some(parent) = path.parent() {
         if !parent.exists() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
     }
 
     // Create template config if it doesn't exist
     if !path.exists() {
-        let _ = std::fs::write(&path, default_config_template());
+        std::fs::write(&path, default_config_template())
+            .map_err(|e| format!("Failed to create config file: {}", e))?;
     }
+
+    Ok(path)
+}
+
+/// Ensure config directory and template file exist.
+fn ensure_config_exists() {
+    let _ = ensure_config_file_exists();
 }
 
 /// Load settings from the config file

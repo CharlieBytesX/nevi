@@ -125,10 +125,12 @@ pub fn build_health_report(input: &HealthReportInput) -> String {
         path_label(input.config_path.as_ref())
     ));
     report.push_str(&format!(
-        "- Languages file: {} ({})\n\n",
+        "- Languages file: {} ({})\n",
         file_status_label(&input.languages_status),
         path_label(input.languages_path.as_ref())
     ));
+    report.push_str("- Open user config: `:ConfigOpen`\n");
+    report.push_str("- View latest default config: `:ConfigDefaults`\n\n");
 
     report.push_str("## Performance\n");
     report.push_str(&format!(
@@ -383,6 +385,8 @@ mod tests {
         assert!(report.contains("# Nevi Health"));
         assert!(report.contains("/home/me/.config/nevi/config.toml"));
         assert!(report.contains("Configuration file: ok"));
+        assert!(report.contains(":ConfigOpen"));
+        assert!(report.contains(":ConfigDefaults"));
         assert!(report.contains("Languages file: missing"));
         assert!(report.contains("Profiling: disabled"));
         assert!(report.contains("/tmp/nevi_profile.log"));

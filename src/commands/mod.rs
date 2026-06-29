@@ -142,6 +142,10 @@ pub enum Command {
     Keymaps,
     /// :checkhealth - Open the editor health report
     CheckHealth,
+    /// :ConfigOpen - Open the user config file
+    ConfigOpen,
+    /// :ConfigDefaults - Open the latest default config template
+    ConfigDefaults,
     /// :marks - Show all marks
     Marks,
     /// :delmarks {marks} - Delete specified marks
@@ -597,6 +601,18 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         takes_args: false,
     },
     CommandSpec {
+        command: "ConfigOpen",
+        aliases: &["configopen", "config", "ConfigEdit", "configedit"],
+        description: "Open user config file",
+        takes_args: false,
+    },
+    CommandSpec {
+        command: "ConfigDefaults",
+        aliases: &["configdefaults", "defaults"],
+        description: "Open latest default config template",
+        takes_args: false,
+    },
+    CommandSpec {
         command: "marks",
         aliases: &[],
         description: "Show all marks",
@@ -1016,6 +1032,8 @@ pub fn parse_command(input: &str) -> Command {
         "Themes" | "themes" => Command::Themes,
         "Keymaps" | "keymaps" | "keys" => Command::Keymaps,
         "checkhealth" | "CheckHealth" | "Health" | "health" => Command::CheckHealth,
+        "ConfigOpen" | "configopen" | "config" | "ConfigEdit" | "configedit" => Command::ConfigOpen,
+        "ConfigDefaults" | "configdefaults" | "defaults" => Command::ConfigDefaults,
 
         // Marks commands
         "marks" => Command::Marks,
@@ -1763,6 +1781,43 @@ mod tests {
         assert!(
             rows.iter().any(|(name, _)| name == ":checkhealth"),
             "expected :checkhealth in command cheatsheet rows"
+        );
+    }
+
+    #[test]
+    fn config_commands_are_parseable_and_suggested() {
+        assert!(matches!(parse_command("ConfigOpen"), Command::ConfigOpen));
+        assert!(matches!(parse_command("configopen"), Command::ConfigOpen));
+        assert!(matches!(parse_command("config"), Command::ConfigOpen));
+        assert!(matches!(
+            parse_command("ConfigDefaults"),
+            Command::ConfigDefaults
+        ));
+        assert!(matches!(
+            parse_command("configdefaults"),
+            Command::ConfigDefaults
+        ));
+
+        let suggestions = command_suggestions("config", 8);
+        assert!(
+            suggestions.iter().any(|item| item.command == "ConfigOpen"),
+            "expected ConfigOpen to match config query"
+        );
+        assert!(
+            suggestions
+                .iter()
+                .any(|item| item.command == "ConfigDefaults"),
+            "expected ConfigDefaults to match config query"
+        );
+
+        let rows = command_cheatsheet_rows();
+        assert!(
+            rows.iter().any(|(name, _)| name == ":ConfigOpen"),
+            "expected :ConfigOpen in command cheatsheet rows"
+        );
+        assert!(
+            rows.iter().any(|(name, _)| name == ":ConfigDefaults"),
+            "expected :ConfigDefaults in command cheatsheet rows"
         );
     }
 

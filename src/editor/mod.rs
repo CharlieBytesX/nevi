@@ -1647,6 +1647,29 @@ impl Editor {
         ));
     }
 
+    /// Open the user's config file, creating the default template first if needed.
+    pub fn open_user_config_file(&mut self) -> Result<std::path::PathBuf, String> {
+        let path = crate::config::ensure_config_file_exists()?;
+        self.open_file(path.clone())
+            .map_err(|e| format!("Failed to open config: {}", e))?;
+        Ok(path)
+    }
+
+    /// Open the latest generated default config template in the read-only preview overlay.
+    pub fn open_config_defaults_preview(&mut self) {
+        let source = format!(
+            "```toml\n{}\n```",
+            crate::config::default_config_template_text()
+        );
+        let rendered = crate::markdown_preview::render_markdown(&source);
+        let width = crate::markdown_preview::preview_content_width(self.term_width);
+        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::with_title(
+            rendered,
+            width,
+            "Config Defaults",
+        ));
+    }
+
     /// Close the floating Markdown preview.
     pub fn close_markdown_preview(&mut self) {
         self.markdown_preview = None;

@@ -119,6 +119,8 @@ nevi file1.rs file2.rs
 - `:q` - Quit
 - `:wq` - Save and quit
 - `:checkhealth` / `:Health` - Open editor health report
+- `:ConfigOpen` / `:config` - Open your user config file
+- `:ConfigDefaults` - View the latest built-in default config template
 - `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
@@ -156,7 +158,13 @@ enabled = true
 enabled = true
 ```
 
-See the generated config file at `~/.config/nevi/config.toml` for all available options with documentation.
+Run `:ConfigOpen` (or `:config`) to open your user config file from inside
+Nevi. Run `:ConfigDefaults` to view the latest built-in default config template
+without changing your existing config. Existing config files stay user-owned;
+Nevi does not rewrite them when new defaults are added.
+
+See the generated config file at `~/.config/nevi/config.toml` for all available
+options with documentation.
 
 ## Custom Themes
 
@@ -325,9 +333,10 @@ summary includes count, retained sample count, total, average, p50, p95, and max
 microseconds for metrics such as key handling, syntax updates, full renders, and
 terminal-only renders.
 
-Run `:checkhealth` (or `:Health`) inside Nevi to see config paths, LSP settings,
-profiling status, and any profile summary from `/tmp/nevi_profile.log`. Profile
-summaries are written when a profiled Nevi session exits.
+Run `:checkhealth` (or `:Health`) inside Nevi to see config paths, config
+discoverability commands, LSP settings, profiling status, and any profile
+summary from `/tmp/nevi_profile.log`. Profile summaries are written when a
+profiled Nevi session exits.
 
 ## License
 
