@@ -31,6 +31,31 @@ The file explorer sidebar is `35` columns wide by default. To change that:
 width = 42
 ```
 
+### Remapping Explorer Keys
+
+Explorer-mode keys can be remapped separately from global normal-mode keys:
+
+```toml
+[[keymap.explorer]]
+key = "o"
+action = "toggle_or_open"
+desc = "Toggle directory or open file"
+
+[[keymap.explorer]]
+key = "<C-r>"
+action = "refresh"
+desc = "Refresh explorer"
+```
+
+User mappings replace the shipped default for the same Explorer action. Supported
+actions are: `close`, `move_down`, `move_up`, `move_to_top`, `move_to_bottom`,
+`half_page_down`, `half_page_up`, `page_down`, `page_up`, `toggle_or_open`,
+`expand_or_open`, `collapse_or_parent`, `toggle_expand`, `collapse_all`,
+`refresh`, `show_explorer_keymaps`, `go_to_parent`, `focus_editor`,
+`widen_sidebar`, `narrow_sidebar`, `reset_sidebar_width`, `create`, `rename`,
+`delete`, `copy`, `cut`, `paste`, `search`, `next_match`, and
+`previous_match`.
+
 ### Remapping Keys in Normal Mode
 
 Want `H` to go to the start of the line and `L` to go to the end? Add this:

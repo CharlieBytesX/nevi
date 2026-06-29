@@ -8552,16 +8552,6 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
         return;
     }
 
-    if editor.explorer.take_goto_top_sequence() {
-        if matches!(
-            (key.modifiers, key.code),
-            (KeyModifiers::NONE, KeyCode::Char('g'))
-        ) {
-            editor.explorer.move_to_top();
-            return;
-        }
-    }
-
     // Handle leader key sequences (same as normal mode)
     if let Some(ref mut sequence) = editor.leader_sequence {
         if key.code == KeyCode::Esc {
@@ -8597,6 +8587,26 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
         return;
     }
 
+    if let Some(ref mut sequence) = editor.explorer_key_sequence {
+        if let Some(part) = explorer_sequence_part(key) {
+            sequence.push_str(&part);
+            let seq = sequence.clone();
+
+            if let Some(action) = editor.keymap.get_explorer_sequence_action(&seq) {
+                editor.explorer_key_sequence = None;
+                execute_explorer_mode_action(editor, action);
+                return;
+            }
+
+            if editor.keymap.is_explorer_sequence_prefix(&seq) {
+                return;
+            }
+        }
+
+        editor.explorer_key_sequence = None;
+        return;
+    }
+
     // Check if this key is the leader key
     if editor.keymap.has_leader_mappings() && editor.keymap.is_leader_key(key) {
         editor.leader_sequence = Some(String::new());
@@ -8604,183 +8614,107 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
         return;
     }
 
-    match (key.modifiers, key.code) {
-        // Close explorer
-        (KeyModifiers::NONE, KeyCode::Esc)
-        | (KeyModifiers::CONTROL, KeyCode::Char('['))
-        | (KeyModifiers::NONE, KeyCode::Char('q')) => {
-            editor.close_explorer();
+    if let Some(part) = explorer_sequence_part(key) {
+        if editor.keymap.is_explorer_sequence_prefix(&part) {
+            editor.explorer_key_sequence = Some(part);
+            return;
         }
 
-        // Move down
-        (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
-            editor.explorer.move_down();
+        if let Some(action) = editor.keymap.get_explorer_sequence_action(&part) {
+            execute_explorer_mode_action(editor, action);
+            return;
         }
+    }
 
-        // Move up
-        (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
-            editor.explorer.move_up();
-        }
+    if let Some(action) = editor.keymap.get_explorer_action(key) {
+        execute_explorer_mode_action(editor, action);
+    }
+}
 
-        // gg - move to top
-        (KeyModifiers::NONE, KeyCode::Char('g')) => {
-            editor.explorer.start_goto_top_sequence();
-        }
+fn explorer_sequence_part(key: KeyEvent) -> Option<String> {
+    match key {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers,
+            ..
+        } if modifiers.is_empty() || modifiers == KeyModifiers::SHIFT => Some(c.to_string()),
+        _ => None,
+    }
+}
 
-        // G - move to bottom
-        (KeyModifiers::SHIFT, KeyCode::Char('G')) | (KeyModifiers::NONE, KeyCode::Char('G')) => {
-            editor.explorer.move_to_bottom();
-        }
+fn execute_explorer_mode_action(editor: &mut Editor, action: crate::config::ExplorerModeAction) {
+    use crate::config::ExplorerModeAction;
 
-        // Ctrl+d / Ctrl+u - half-page movement
-        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
-            editor
-                .explorer
-                .move_page_down(explorer_half_page_rows(editor));
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
-            editor
-                .explorer
-                .move_page_up(explorer_half_page_rows(editor));
-        }
-
-        // Ctrl+f / Ctrl+b - page movement
-        (KeyModifiers::CONTROL, KeyCode::Char('f')) => {
-            editor
-                .explorer
-                .move_page_down(explorer_visible_rows(editor));
-        }
-        (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
-            editor.explorer.move_page_up(explorer_visible_rows(editor));
-        }
-
-        // Enter - toggle directory or open file
-        (KeyModifiers::NONE, KeyCode::Enter) => {
-            if let Some(path) = editor.explorer_selected_path() {
-                if path.is_dir() {
-                    // Toggle directory expand/collapse
-                    editor.explorer.toggle_expand();
-                } else {
-                    // Open file and switch to normal mode
-                    let path_clone = path.clone();
-                    if let Err(e) = editor.open_file(path_clone) {
-                        editor.set_status(format!("Error opening file: {}", e));
-                    } else {
-                        editor.mode = Mode::Normal;
-                    }
-                }
-            }
-        }
-
-        // l/Right - expand directory or open file
-        (KeyModifiers::NONE, KeyCode::Char('l')) | (KeyModifiers::NONE, KeyCode::Right) => {
-            if let Some(path) = editor.explorer_selected_path() {
-                if path.is_dir() {
-                    editor.explorer.expand();
-                } else {
-                    let path_clone = path.clone();
-                    if let Err(e) = editor.open_file(path_clone) {
-                        editor.set_status(format!("Error opening file: {}", e));
-                    } else {
-                        editor.mode = Mode::Normal;
-                    }
-                }
-            }
-        }
-
-        // Collapse directory or go to parent
-        (KeyModifiers::NONE, KeyCode::Char('h')) | (KeyModifiers::NONE, KeyCode::Left) => {
-            editor.explorer.collapse();
-        }
-
-        // Toggle expand/collapse
-        (KeyModifiers::NONE, KeyCode::Tab) => {
-            editor.explorer.toggle_expand();
-        }
-
-        // Collapse all
-        (KeyModifiers::SHIFT, KeyCode::Char('W')) | (KeyModifiers::NONE, KeyCode::Char('W')) => {
-            editor.explorer.collapse_all();
-        }
-
-        // Refresh
-        (KeyModifiers::SHIFT, KeyCode::Char('R')) => {
+    match action {
+        ExplorerModeAction::Close => editor.close_explorer(),
+        ExplorerModeAction::MoveDown => editor.explorer.move_down(),
+        ExplorerModeAction::MoveUp => editor.explorer.move_up(),
+        ExplorerModeAction::MoveToTop => editor.explorer.move_to_top(),
+        ExplorerModeAction::MoveToBottom => editor.explorer.move_to_bottom(),
+        ExplorerModeAction::HalfPageDown => editor
+            .explorer
+            .move_page_down(explorer_half_page_rows(editor)),
+        ExplorerModeAction::HalfPageUp => editor
+            .explorer
+            .move_page_up(explorer_half_page_rows(editor)),
+        ExplorerModeAction::PageDown => editor
+            .explorer
+            .move_page_down(explorer_visible_rows(editor)),
+        ExplorerModeAction::PageUp => editor.explorer.move_page_up(explorer_visible_rows(editor)),
+        ExplorerModeAction::ToggleOrOpen => toggle_or_open_explorer_selection(editor),
+        ExplorerModeAction::ExpandOrOpen => expand_or_open_explorer_selection(editor),
+        ExplorerModeAction::CollapseOrParent => editor.explorer.collapse(),
+        ExplorerModeAction::ToggleExpand => editor.explorer.toggle_expand(),
+        ExplorerModeAction::CollapseAll => editor.explorer.collapse_all(),
+        ExplorerModeAction::Refresh => {
             editor.explorer.refresh();
             editor.refresh_explorer_git_statuses();
         }
+        ExplorerModeAction::ShowExplorerKeymaps => editor.open_keymaps_picker_with_query("expl"),
+        ExplorerModeAction::GoToParent => editor.explorer.go_to_parent(),
+        ExplorerModeAction::FocusEditor => editor.unfocus_explorer(),
+        ExplorerModeAction::WidenSidebar => editor.widen_explorer(),
+        ExplorerModeAction::NarrowSidebar => editor.narrow_explorer(),
+        ExplorerModeAction::ResetSidebarWidth => editor.reset_explorer_width(),
+        ExplorerModeAction::Create => editor.explorer.start_add(),
+        ExplorerModeAction::Rename => editor.explorer.start_rename(),
+        ExplorerModeAction::Delete => editor.explorer.start_delete(),
+        ExplorerModeAction::Copy => editor.explorer.copy_selected(),
+        ExplorerModeAction::Cut => editor.explorer.cut_selected(),
+        ExplorerModeAction::Paste => execute_explorer_paste(editor),
+        ExplorerModeAction::Search => editor.explorer.start_search(),
+        ExplorerModeAction::NextMatch => editor.explorer.next_match(),
+        ExplorerModeAction::PreviousMatch => editor.explorer.prev_match(),
+    }
+}
 
-        // Help / discoverability
-        (KeyModifiers::SHIFT, KeyCode::Char('?')) | (KeyModifiers::NONE, KeyCode::Char('?')) => {
-            editor.open_keymaps_picker_with_query("expl");
+fn toggle_or_open_explorer_selection(editor: &mut Editor) {
+    if let Some(path) = editor.explorer_selected_path() {
+        if path.is_dir() {
+            editor.explorer.toggle_expand();
+        } else {
+            let path_clone = path.clone();
+            if let Err(e) = editor.open_file(path_clone) {
+                editor.set_status(format!("Error opening file: {}", e));
+            } else {
+                editor.mode = Mode::Normal;
+            }
         }
+    }
+}
 
-        // Go to parent directory
-        (KeyModifiers::NONE, KeyCode::Char('-')) => {
-            editor.explorer.go_to_parent();
+fn expand_or_open_explorer_selection(editor: &mut Editor) {
+    if let Some(path) = editor.explorer_selected_path() {
+        if path.is_dir() {
+            editor.explorer.expand();
+        } else {
+            let path_clone = path.clone();
+            if let Err(e) = editor.open_file(path_clone) {
+                editor.set_status(format!("Error opening file: {}", e));
+            } else {
+                editor.mode = Mode::Normal;
+            }
         }
-
-        // Focus editor (keep explorer open)
-        (KeyModifiers::CONTROL, KeyCode::Char('l')) => {
-            editor.unfocus_explorer();
-        }
-
-        // Resize explorer sidebar
-        (KeyModifiers::SHIFT, KeyCode::Char('>')) | (KeyModifiers::NONE, KeyCode::Char('>')) => {
-            editor.widen_explorer();
-        }
-        (KeyModifiers::SHIFT, KeyCode::Char('<')) | (KeyModifiers::NONE, KeyCode::Char('<')) => {
-            editor.narrow_explorer();
-        }
-        (KeyModifiers::NONE, KeyCode::Char('=')) => {
-            editor.reset_explorer_width();
-        }
-
-        // Add file/folder
-        (KeyModifiers::NONE, KeyCode::Char('a')) => {
-            editor.explorer.start_add();
-        }
-
-        // Rename
-        (KeyModifiers::NONE, KeyCode::Char('r')) => {
-            editor.explorer.start_rename();
-        }
-
-        // Delete
-        (KeyModifiers::NONE, KeyCode::Char('d')) => {
-            editor.explorer.start_delete();
-        }
-
-        // Search
-        (KeyModifiers::NONE, KeyCode::Char('/')) => {
-            editor.explorer.start_search();
-        }
-
-        // Next search match
-        (KeyModifiers::NONE, KeyCode::Char('n')) => {
-            editor.explorer.next_match();
-        }
-
-        // Previous search match
-        (KeyModifiers::SHIFT, KeyCode::Char('N')) => {
-            editor.explorer.prev_match();
-        }
-
-        // Copy
-        (KeyModifiers::NONE, KeyCode::Char('c')) => {
-            editor.explorer.copy_selected();
-        }
-
-        // Cut
-        (KeyModifiers::NONE, KeyCode::Char('x')) => {
-            editor.explorer.cut_selected();
-        }
-
-        // Paste
-        (KeyModifiers::NONE, KeyCode::Char('p')) => {
-            execute_explorer_paste(editor);
-        }
-
-        _ => {}
     }
 }
 
@@ -10188,6 +10122,61 @@ mod tests {
         handle_key(&mut editor, key('='));
         assert_eq!(editor.explorer.width, 42);
         assert_eq!(editor.panes()[0].rect.x, 43);
+    }
+
+    #[test]
+    fn explorer_keymap_can_rebind_sidebar_width_action() {
+        let settings: Settings = toml::from_str(
+            r#"
+            [[keymap.explorer]]
+            key = "o"
+            action = "widen_sidebar"
+            desc = "Widen explorer sidebar"
+            "#,
+        )
+        .expect("parse settings");
+        let mut editor = Editor::new(settings);
+        editor.set_size(100, 24);
+        editor.open_explorer();
+
+        assert_eq!(editor.explorer.width, 35);
+
+        handle_key(&mut editor, key('o'));
+        assert_eq!(editor.mode, Mode::Explorer);
+        assert_eq!(editor.explorer.width, 40);
+
+        handle_key(&mut editor, key('>'));
+        assert_eq!(
+            editor.explorer.width, 40,
+            "user binding should replace the default for the same explorer action"
+        );
+    }
+
+    #[test]
+    fn invalid_explorer_keymap_keeps_default_binding_and_reports_error() {
+        let settings: Settings = toml::from_str(
+            r#"
+            [[keymap.explorer]]
+            key = "<Nope>"
+            action = "widen_sidebar"
+            desc = "Widen explorer sidebar"
+            "#,
+        )
+        .expect("parse settings");
+        let mut editor = Editor::new(settings);
+        editor.set_size(100, 24);
+        editor.open_explorer();
+
+        handle_key(&mut editor, key('>'));
+        assert_eq!(editor.explorer.width, 40);
+
+        let errors = editor.take_startup_errors();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("invalid explorer mode key '<Nope>'")),
+            "expected invalid explorer keymap error, got {errors:?}"
+        );
     }
 
     #[test]

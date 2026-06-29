@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use crate::explorer::DEFAULT_EXPLORER_WIDTH;
 
-pub use keymap::{CommandModeAction, KeymapLookup, LeaderAction, LeaderHint};
+pub use keymap::{CommandModeAction, ExplorerModeAction, KeymapLookup, LeaderAction, LeaderHint};
 pub use languages::{load_languages_config, FormatterConfig, LanguageConfig, LanguagesConfig};
 
 /// Main settings structure
@@ -242,6 +242,8 @@ pub struct KeymapSettings {
     pub insert: Vec<KeymapEntry>,
     /// Command mode mappings for command-line UX actions
     pub command_mappings: Vec<CommandModeMapping>,
+    /// Explorer mode mappings for file explorer actions
+    pub explorer: Vec<ExplorerModeMapping>,
     /// Leader key mappings (e.g., <leader>w -> :w<CR>)
     pub leader_mappings: Vec<LeaderMapping>,
 }
@@ -307,6 +309,7 @@ impl Default for KeymapSettings {
                     desc: Some("Select previous popup item".to_string()),
                 },
             ],
+            explorer: default_explorer_mappings(),
             leader_mappings: vec![
                 // LSP actions
                 LeaderMapping {
@@ -508,6 +511,80 @@ pub struct CommandModeMapping {
     /// Optional description for docs/which-key style UIs
     #[serde(default)]
     pub desc: Option<String>,
+}
+
+/// An explorer-mode mapping for file explorer actions
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExplorerModeMapping {
+    /// Key notation (e.g., "j", "<Down>", "gg", "?")
+    pub key: String,
+    /// Action name (move_down, refresh, create, widen_sidebar, etc.)
+    pub action: String,
+    /// Optional description for docs/which-key style UIs
+    #[serde(default)]
+    pub desc: Option<String>,
+}
+
+fn default_explorer_mappings() -> Vec<ExplorerModeMapping> {
+    let mappings = [
+        ("<Esc>", "close", "Close explorer"),
+        ("<C-[>", "close", "Close explorer"),
+        ("q", "close", "Close explorer"),
+        ("j", "move_down", "Move down"),
+        ("<Down>", "move_down", "Move down"),
+        ("k", "move_up", "Move up"),
+        ("<Up>", "move_up", "Move up"),
+        ("gg", "move_to_top", "Move to top"),
+        ("G", "move_to_bottom", "Move to bottom"),
+        ("<C-d>", "half_page_down", "Move half page down"),
+        ("<C-u>", "half_page_up", "Move half page up"),
+        ("<C-f>", "page_down", "Move page down"),
+        ("<C-b>", "page_up", "Move page up"),
+        ("<CR>", "toggle_or_open", "Toggle directory or open file"),
+        ("l", "expand_or_open", "Expand directory or open file"),
+        ("<Right>", "expand_or_open", "Expand directory or open file"),
+        (
+            "h",
+            "collapse_or_parent",
+            "Collapse directory or go to parent",
+        ),
+        (
+            "<Left>",
+            "collapse_or_parent",
+            "Collapse directory or go to parent",
+        ),
+        ("<Tab>", "toggle_expand", "Toggle expand/collapse"),
+        ("W", "collapse_all", "Collapse all directories"),
+        ("R", "refresh", "Refresh explorer and git status"),
+        ("?", "show_explorer_keymaps", "Show explorer keymaps"),
+        ("-", "go_to_parent", "Go to parent directory"),
+        (
+            "<C-l>",
+            "focus_editor",
+            "Focus editor and keep explorer open",
+        ),
+        (">", "widen_sidebar", "Widen explorer sidebar"),
+        ("<", "narrow_sidebar", "Narrow explorer sidebar"),
+        ("=", "reset_sidebar_width", "Reset explorer sidebar width"),
+        ("a", "create", "Create file or directory"),
+        ("r", "rename", "Rename selected item"),
+        ("d", "delete", "Delete selected item"),
+        ("c", "copy", "Copy selected item"),
+        ("x", "cut", "Cut selected item"),
+        ("p", "paste", "Paste copied/cut item"),
+        ("/", "search", "Search explorer"),
+        ("n", "next_match", "Next search match"),
+        ("N", "previous_match", "Previous search match"),
+    ];
+
+    mappings
+        .into_iter()
+        .map(|(key, action, desc)| ExplorerModeMapping {
+            key: key.to_string(),
+            action: action.to_string(),
+            desc: Some(desc.to_string()),
+        })
+        .collect()
 }
 
 /// LSP (Language Server Protocol) settings
@@ -1249,6 +1326,25 @@ fn default_config_template() -> &'static str {
 # [[keymap.command_mappings]]
 # key = "<C-j>"
 # action = "popup_next"
+#
+# To override file explorer mode bindings:
+# [[keymap.explorer]]
+# key = "o"
+# action = "toggle_or_open"
+# desc = "Toggle directory or open file"
+#
+# [[keymap.explorer]]
+# key = "<C-r>"
+# action = "refresh"
+# desc = "Refresh explorer"
+#
+# Explorer action names:
+# close, move_down, move_up, move_to_top, move_to_bottom, half_page_down,
+# half_page_up, page_down, page_up, toggle_or_open, expand_or_open,
+# collapse_or_parent, toggle_expand, collapse_all, refresh,
+# show_explorer_keymaps, go_to_parent, focus_editor, widen_sidebar,
+# narrow_sidebar, reset_sidebar_width, create, rename, delete, copy, cut,
+# paste, search, next_match, previous_match
 
 # ============================================================================
 # LSP (Language Server Protocol)
@@ -1351,6 +1447,9 @@ pub fn load_config() -> Settings {
                 // Merge command mode mappings: defaults + user overrides by action
                 user_settings.keymap.command_mappings =
                     merge_command_mappings(&user_settings.keymap.command_mappings);
+                // Merge explorer mode mappings: defaults + user overrides by action
+                user_settings.keymap.explorer =
+                    merge_explorer_mappings(&user_settings.keymap.explorer);
                 // Merge LSP server configs so partial per-server overrides keep defaults.
                 user_settings.lsp.servers =
                     merge_lsp_servers_with_defaults(user_settings.lsp.servers);
@@ -1446,6 +1545,27 @@ fn merge_command_mappings(user_mappings: &[CommandModeMapping]) -> Vec<CommandMo
 
     // Start with defaults that aren't overridden by user action
     let mut merged: Vec<CommandModeMapping> = defaults
+        .into_iter()
+        .filter(|m| !user_actions.contains(m.action.as_str()))
+        .collect();
+
+    // Add all user mappings
+    merged.extend(user_mappings.iter().cloned());
+
+    merged
+}
+
+/// Merge user explorer-mode mappings with defaults.
+/// User mappings take precedence for the same action.
+fn merge_explorer_mappings(user_mappings: &[ExplorerModeMapping]) -> Vec<ExplorerModeMapping> {
+    let defaults = KeymapSettings::default().explorer;
+
+    // Collect user-defined action ids for quick lookup
+    let user_actions: std::collections::HashSet<&str> =
+        user_mappings.iter().map(|m| m.action.as_str()).collect();
+
+    // Start with defaults that aren't overridden by user action
+    let mut merged: Vec<ExplorerModeMapping> = defaults
         .into_iter()
         .filter(|m| !user_actions.contains(m.action.as_str()))
         .collect();

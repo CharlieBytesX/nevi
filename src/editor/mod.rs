@@ -882,6 +882,8 @@ pub struct Editor {
     pub keymap: KeymapLookup,
     /// Leader key sequence being built (None if not in leader mode)
     pub leader_sequence: Option<String>,
+    /// Explorer-mode key sequence being built (for bindings like `gg`)
+    pub explorer_key_sequence: Option<String>,
     /// When leader mode started (for timeout tracking)
     pub leader_sequence_start: Option<Instant>,
     /// Action to execute when leader timeout expires
@@ -1407,6 +1409,7 @@ impl Editor {
             settings,
             keymap,
             leader_sequence: None,
+            explorer_key_sequence: None,
             leader_sequence_start: None,
             leader_pending_action: None,
             pending_external_command: None,

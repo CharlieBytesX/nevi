@@ -1,9 +1,9 @@
 //! Keymap parsing and lookup for custom key remappings
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::KeymapSettings;
+use super::{ExplorerModeMapping, KeymapSettings};
 
 /// Action to execute from a leader mapping
 #[derive(Debug, Clone)]
@@ -60,6 +60,41 @@ pub enum CommandModeAction {
     PopupPrev,
 }
 
+/// Action for file explorer mode keybindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExplorerModeAction {
+    Close,
+    MoveDown,
+    MoveUp,
+    MoveToTop,
+    MoveToBottom,
+    HalfPageDown,
+    HalfPageUp,
+    PageDown,
+    PageUp,
+    ToggleOrOpen,
+    ExpandOrOpen,
+    CollapseOrParent,
+    ToggleExpand,
+    CollapseAll,
+    Refresh,
+    ShowExplorerKeymaps,
+    GoToParent,
+    FocusEditor,
+    WidenSidebar,
+    NarrowSidebar,
+    ResetSidebarWidth,
+    Create,
+    Rename,
+    Delete,
+    Copy,
+    Cut,
+    Paste,
+    Search,
+    NextMatch,
+    PreviousMatch,
+}
+
 /// Lookup table for custom key remappings
 #[derive(Debug, Clone)]
 pub struct KeymapLookup {
@@ -71,6 +106,10 @@ pub struct KeymapLookup {
     insert: HashMap<KeyEvent, KeyEvent>,
     /// Command mode mappings: key -> command-line UX action
     command: HashMap<KeyEvent, CommandModeAction>,
+    /// Explorer mode mappings: key -> explorer action
+    explorer: HashMap<KeyEvent, ExplorerModeAction>,
+    /// Explorer mode multi-key sequences, such as `gg`.
+    explorer_sequences: HashMap<String, ExplorerModeAction>,
     /// Leader key (None if not configured)
     leader_key: Option<KeyEvent>,
     /// Leader mappings: key sequence -> action
@@ -86,6 +125,8 @@ impl Default for KeymapLookup {
             visual: HashMap::new(),
             insert: HashMap::new(),
             command: HashMap::new(),
+            explorer: HashMap::new(),
+            explorer_sequences: HashMap::new(),
             leader_key: None,
             leader_mappings: HashMap::new(),
             leader_metadata: HashMap::new(),
@@ -100,7 +141,10 @@ impl KeymapLookup {
         let mut visual = HashMap::new();
         let mut insert = HashMap::new();
         let mut command = HashMap::new();
+        let (explorer, explorer_sequences, explorer_errors) =
+            parse_explorer_mode_mappings(&settings.explorer);
         let mut errors = Vec::new();
+        errors.extend(explorer_errors);
 
         for entry in &settings.normal {
             if let Some(from) = parse_key_notation(&entry.from) {
@@ -207,6 +251,8 @@ impl KeymapLookup {
                 visual,
                 insert,
                 command,
+                explorer,
+                explorer_sequences,
                 leader_key,
                 leader_mappings,
                 leader_metadata,
@@ -233,6 +279,33 @@ impl KeymapLookup {
     /// Look up a command-mode mapping for command-line UX actions.
     pub fn get_command_action(&self, key: KeyEvent) -> Option<CommandModeAction> {
         self.command.get(&key).copied()
+    }
+
+    /// Look up an explorer-mode mapping for file explorer actions.
+    pub fn get_explorer_action(&self, key: KeyEvent) -> Option<ExplorerModeAction> {
+        if let Some(action) = self.explorer.get(&key).copied() {
+            return Some(action);
+        }
+
+        for fallback in normalized_char_key_candidates(key) {
+            if let Some(action) = self.explorer.get(&fallback).copied() {
+                return Some(action);
+            }
+        }
+
+        None
+    }
+
+    /// Look up a complete explorer-mode key sequence.
+    pub fn get_explorer_sequence_action(&self, sequence: &str) -> Option<ExplorerModeAction> {
+        self.explorer_sequences.get(sequence).copied()
+    }
+
+    /// Check if an explorer-mode sequence could continue.
+    pub fn is_explorer_sequence_prefix(&self, sequence: &str) -> bool {
+        self.explorer_sequences
+            .keys()
+            .any(|key| key.starts_with(sequence) && key != sequence)
     }
 
     /// Check if there are any normal mode mappings
@@ -332,6 +405,121 @@ impl KeymapLookup {
     }
 }
 
+fn normalized_char_key_candidates(key: KeyEvent) -> Vec<KeyEvent> {
+    let KeyCode::Char(c) = key.code else {
+        return Vec::new();
+    };
+
+    let mut candidates = Vec::new();
+    if c.is_ascii_uppercase() {
+        candidates.push(KeyEvent::new(
+            KeyCode::Char(c),
+            key.modifiers | KeyModifiers::SHIFT,
+        ));
+        let mut without_shift = key.modifiers;
+        without_shift.remove(KeyModifiers::SHIFT);
+        candidates.push(KeyEvent::new(KeyCode::Char(c), without_shift));
+    } else if !c.is_ascii_alphabetic() {
+        let mut without_shift = key.modifiers;
+        without_shift.remove(KeyModifiers::SHIFT);
+        candidates.push(KeyEvent::new(KeyCode::Char(c), without_shift));
+        candidates.push(KeyEvent::new(
+            KeyCode::Char(c),
+            key.modifiers | KeyModifiers::SHIFT,
+        ));
+    }
+
+    candidates
+}
+
+fn parse_explorer_mode_mappings(
+    user_mappings: &[ExplorerModeMapping],
+) -> (
+    HashMap<KeyEvent, ExplorerModeAction>,
+    HashMap<String, ExplorerModeAction>,
+    Vec<String>,
+) {
+    let mut errors = Vec::new();
+    let mut valid_user_mappings = Vec::new();
+
+    for mapping in user_mappings {
+        let Some(action) = parse_explorer_mode_action(&mapping.action) else {
+            errors.push(format!(
+                "Keymap: invalid explorer mode action '{}'",
+                mapping.action
+            ));
+            continue;
+        };
+
+        match parse_explorer_binding(&mapping.key) {
+            Some(binding) => valid_user_mappings.push((mapping.key.clone(), binding, action)),
+            None => errors.push(format!(
+                "Keymap: invalid explorer mode key '{}'",
+                mapping.key
+            )),
+        }
+    }
+
+    let overridden_actions: HashSet<ExplorerModeAction> = valid_user_mappings
+        .iter()
+        .map(|(_, _, action)| *action)
+        .collect();
+
+    let mut combined = Vec::new();
+    for mapping in KeymapSettings::default().explorer {
+        let Some(action) = parse_explorer_mode_action(&mapping.action) else {
+            continue;
+        };
+        if !overridden_actions.contains(&action) {
+            if let Some(binding) = parse_explorer_binding(&mapping.key) {
+                combined.push((mapping.key, binding, action));
+            }
+        }
+    }
+    combined.extend(valid_user_mappings);
+
+    let mut keys = HashMap::new();
+    let mut sequences = HashMap::new();
+    for (raw_key, binding, action) in combined {
+        match binding {
+            ExplorerBinding::Key(key) => {
+                keys.insert(key, action);
+            }
+            ExplorerBinding::Sequence => {
+                sequences.insert(raw_key, action);
+            }
+        }
+    }
+
+    (keys, sequences, errors)
+}
+
+enum ExplorerBinding {
+    Key(KeyEvent),
+    Sequence,
+}
+
+fn parse_explorer_binding(key: &str) -> Option<ExplorerBinding> {
+    if let Some(event) = parse_key_notation(key) {
+        return Some(ExplorerBinding::Key(event));
+    }
+
+    if is_plain_explorer_sequence(key) {
+        return Some(ExplorerBinding::Sequence);
+    }
+
+    None
+}
+
+fn is_plain_explorer_sequence(key: &str) -> bool {
+    !key.starts_with('<')
+        && !key.ends_with('>')
+        && key.chars().count() > 1
+        && key
+            .chars()
+            .all(|ch| !ch.is_control() && !ch.is_whitespace())
+}
+
 /// Parse an action string into a LeaderAction
 fn parse_action(action: &str) -> LeaderAction {
     // If it starts with ':', it's a command
@@ -387,6 +575,42 @@ fn parse_command_mode_action(action: &str) -> Option<CommandModeAction> {
         "complete_prev" => Some(CommandModeAction::CompletePrev),
         "popup_next" => Some(CommandModeAction::PopupNext),
         "popup_prev" => Some(CommandModeAction::PopupPrev),
+        _ => None,
+    }
+}
+
+fn parse_explorer_mode_action(action: &str) -> Option<ExplorerModeAction> {
+    match action.trim().to_lowercase().as_str() {
+        "close" => Some(ExplorerModeAction::Close),
+        "move_down" => Some(ExplorerModeAction::MoveDown),
+        "move_up" => Some(ExplorerModeAction::MoveUp),
+        "move_to_top" => Some(ExplorerModeAction::MoveToTop),
+        "move_to_bottom" => Some(ExplorerModeAction::MoveToBottom),
+        "half_page_down" => Some(ExplorerModeAction::HalfPageDown),
+        "half_page_up" => Some(ExplorerModeAction::HalfPageUp),
+        "page_down" => Some(ExplorerModeAction::PageDown),
+        "page_up" => Some(ExplorerModeAction::PageUp),
+        "toggle_or_open" => Some(ExplorerModeAction::ToggleOrOpen),
+        "expand_or_open" => Some(ExplorerModeAction::ExpandOrOpen),
+        "collapse_or_parent" => Some(ExplorerModeAction::CollapseOrParent),
+        "toggle_expand" => Some(ExplorerModeAction::ToggleExpand),
+        "collapse_all" => Some(ExplorerModeAction::CollapseAll),
+        "refresh" => Some(ExplorerModeAction::Refresh),
+        "show_explorer_keymaps" => Some(ExplorerModeAction::ShowExplorerKeymaps),
+        "go_to_parent" => Some(ExplorerModeAction::GoToParent),
+        "focus_editor" => Some(ExplorerModeAction::FocusEditor),
+        "widen_sidebar" => Some(ExplorerModeAction::WidenSidebar),
+        "narrow_sidebar" => Some(ExplorerModeAction::NarrowSidebar),
+        "reset_sidebar_width" => Some(ExplorerModeAction::ResetSidebarWidth),
+        "create" => Some(ExplorerModeAction::Create),
+        "rename" => Some(ExplorerModeAction::Rename),
+        "delete" => Some(ExplorerModeAction::Delete),
+        "copy" => Some(ExplorerModeAction::Copy),
+        "cut" => Some(ExplorerModeAction::Cut),
+        "paste" => Some(ExplorerModeAction::Paste),
+        "search" => Some(ExplorerModeAction::Search),
+        "next_match" => Some(ExplorerModeAction::NextMatch),
+        "previous_match" | "prev_match" => Some(ExplorerModeAction::PreviousMatch),
         _ => None,
     }
 }
@@ -582,6 +806,7 @@ mod tests {
             visual: vec![],
             insert: vec![],
             command_mappings: vec![],
+            explorer: vec![],
             leader_mappings: vec![super::super::LeaderMapping {
                 key: "m".to_string(),
                 action: ":HarpoonAdd".to_string(),
@@ -616,6 +841,7 @@ mod tests {
             visual: vec![],
             insert: vec![],
             command_mappings: vec![],
+            explorer: vec![],
             leader_mappings: vec![super::super::LeaderMapping {
                 key: "w".to_string(),
                 action: ":w<CR>".to_string(),

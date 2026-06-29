@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::FinderItem;
-use crate::config::{KeymapEntry, KeymapSettings, LeaderMapping};
+use crate::config::{ExplorerModeMapping, KeymapEntry, KeymapSettings, LeaderMapping};
 
 /// Raw entry as stored in KEYBINDS.toml. Mode + category come from the table path.
 #[derive(Debug, Clone, Deserialize)]
@@ -135,6 +135,7 @@ pub fn display_row(entry: &KeybindEntry) -> String {
 ///   live), minus any the user has remapped;
 /// - the user's own normal/visual/insert remaps, from `keymap`;
 /// - command-line UX mappings from `keymap.command_mappings`;
+/// - explorer-mode mappings from `keymap.explorer`;
 /// - commands from the live `COMMAND_SPECS` registry;
 /// - leader bindings from `keymap.leader_mappings` (the active, merged set).
 ///
@@ -145,10 +146,11 @@ pub fn keymap_finder_items(keymap: &KeymapSettings) -> Vec<FinderItem> {
     // Drop built-in rows the user has remapped; show their remap instead.
     let mut entries: Vec<KeybindEntry> = raw_key_entries()
         .into_iter()
-        .filter(|entry| !is_remapped(keymap, &entry.mode, &entry.key))
+        .filter(|entry| !is_remapped(keymap, entry))
         .collect();
     entries.extend(remap_entries(keymap));
     entries.extend(command_mode_entries(keymap));
+    entries.extend(explorer_mode_entries(keymap));
     entries.extend(command_entries());
     entries.extend(leader_entries(&keymap.leader_mappings));
     entries.iter().map(entry_to_item).collect()
@@ -156,12 +158,28 @@ pub fn keymap_finder_items(keymap: &KeymapSettings) -> Vec<FinderItem> {
 
 /// True if the user has remapped `key` in the given mode, so the built-in
 /// default row should be replaced by the user's remap.
-fn is_remapped(keymap: &KeymapSettings, mode: &str, key: &str) -> bool {
-    match mode {
-        "normal" => keymap.normal.iter().any(|entry| entry.from == key),
-        "visual" => keymap.visual.iter().any(|entry| entry.from == key),
-        "insert" => keymap.insert.iter().any(|entry| entry.from == key),
-        "cmdline" => keymap.command_mappings.iter().any(|entry| entry.key == key),
+fn is_remapped(keymap: &KeymapSettings, entry: &KeybindEntry) -> bool {
+    match entry.mode.as_str() {
+        "normal" => keymap
+            .normal
+            .iter()
+            .any(|mapping| mapping.from == entry.key),
+        "visual" => keymap
+            .visual
+            .iter()
+            .any(|mapping| mapping.from == entry.key),
+        "insert" => keymap
+            .insert
+            .iter()
+            .any(|mapping| mapping.from == entry.key),
+        "cmdline" => keymap
+            .command_mappings
+            .iter()
+            .any(|mapping| mapping.key == entry.key),
+        "explorer" => keymap
+            .explorer
+            .iter()
+            .any(|mapping| mapping.action == entry.action),
         _ => false,
     }
 }
@@ -262,6 +280,27 @@ fn command_mode_entries(keymap: &KeymapSettings) -> Vec<KeybindEntry> {
             }
         })
         .collect()
+}
+
+/// Rows for file explorer mappings from the live config.
+fn explorer_mode_entries(keymap: &KeymapSettings) -> Vec<KeybindEntry> {
+    keymap.explorer.iter().map(explorer_mapping_entry).collect()
+}
+
+fn explorer_mapping_entry(mapping: &ExplorerModeMapping) -> KeybindEntry {
+    let desc = mapping
+        .desc
+        .clone()
+        .unwrap_or_else(|| mapping.action.clone());
+    KeybindEntry {
+        mode: "explorer".to_string(),
+        category: String::new(),
+        key: mapping.key.clone(),
+        action: mapping.action.clone(),
+        desc,
+        status: "implemented".to_string(),
+        vim_default: false,
+    }
 }
 
 /// Render one entry as an inert finder item (empty path, no metadata) so Enter
@@ -453,6 +492,34 @@ vim_default = true
                     && item.display.to_lowercase().contains("widen")
             }),
             "explorer width resize mappings should appear"
+        );
+    }
+
+    #[test]
+    fn picker_overlays_user_explorer_mappings_by_action() {
+        let mut keymap = KeymapSettings::default();
+        keymap.explorer = vec![ExplorerModeMapping {
+            key: "o".to_string(),
+            action: "widen_sidebar".to_string(),
+            desc: Some("Widen explorer sidebar".to_string()),
+        }];
+
+        let items = keymap_finder_items(&keymap);
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains("o")
+                    && item.display.to_lowercase().contains("widen")
+            }),
+            "custom explorer mapping should appear in :Keymaps"
+        );
+        assert!(
+            !items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains(">")
+                    && item.display.to_lowercase().contains("widen")
+            }),
+            "default explorer binding should be hidden when the action is remapped"
         );
     }
 
