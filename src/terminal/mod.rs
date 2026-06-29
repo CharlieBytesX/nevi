@@ -2311,7 +2311,7 @@ impl Terminal {
         match editor.mode {
             Mode::Command => {
                 // Cursor in command line
-                let cmd_cursor_col = 1 + editor.command_line.cursor; // +1 for ':'
+                let cmd_cursor_col = editor.command_line.display_cursor_col();
                 execute!(
                     self.stdout,
                     cursor::MoveTo(cmd_cursor_col as u16, editor.term_height - 1),
@@ -7627,6 +7627,9 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
         CommandModeAction::InsertRegister => {
             editor.command_line.pending_register = true;
         }
+        CommandModeAction::InsertLiteral => {
+            editor.command_line.pending_literal = true;
+        }
         CommandModeAction::ListCompletions => {
             editor.command_line.list_completions();
         }
@@ -7664,6 +7667,14 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
 }
 
 fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
+    if editor.command_line.pending_literal {
+        editor.command_line.pending_literal = false;
+        if let Some(ch) = command_literal_char(key) {
+            editor.command_line.insert_char(ch);
+        }
+        return;
+    }
+
     if editor.command_line.pending_register {
         editor.command_line.pending_register = false;
         match (key.modifiers, key.code) {
@@ -7767,6 +7778,45 @@ fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
 
         _ => {}
     }
+}
+
+fn command_literal_char(key: KeyEvent) -> Option<char> {
+    match key.code {
+        KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            control_literal_char(c).or(Some(c))
+        }
+        KeyCode::Char(c) => Some(c),
+        KeyCode::Enter => Some('\r'),
+        KeyCode::Tab => Some('\t'),
+        KeyCode::BackTab => Some('\t'),
+        KeyCode::Backspace => Some('\u{8}'),
+        KeyCode::Esc => Some('\u{1b}'),
+        KeyCode::Delete => Some('\u{7f}'),
+        _ => None,
+    }
+}
+
+fn control_literal_char(ch: char) -> Option<char> {
+    let byte = if ch.is_ascii_alphabetic() {
+        ch.to_ascii_uppercase() as u8
+    } else if ch.is_ascii() {
+        ch as u8
+    } else {
+        return None;
+    };
+
+    let code = match byte {
+        b' ' | b'@' => 0x00,
+        b'A'..=b'Z' => byte - b'@',
+        b'[' => 0x1b,
+        b'\\' => 0x1c,
+        b']' => 0x1d,
+        b'^' => 0x1e,
+        b'_' => 0x1f,
+        b'?' => 0x7f,
+        _ => return None,
+    };
+    char::from_u32(code as u32)
 }
 
 fn handle_search_mode(editor: &mut Editor, key: KeyEvent) {
@@ -10006,6 +10056,40 @@ mod tests {
         handle_key(&mut editor, alt_key('r'));
 
         assert_ne!(editor.command_line.popup_mode, CommandPopupMode::History);
+    }
+
+    #[test]
+    fn command_ctrl_v_inserts_next_control_key_literally() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("write keep");
+
+        handle_key(&mut editor, ctrl_key('v'));
+        handle_key(&mut editor, ctrl_key('u'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "write keep\u{15}");
+        assert_eq!(editor.command_line.display(), ":write keep^U");
+        assert_eq!(
+            editor.command_line.cursor,
+            "write keep\u{15}".chars().count()
+        );
+    }
+
+    #[test]
+    fn command_ctrl_q_inserts_next_control_key_literally() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("write keep");
+
+        handle_key(&mut editor, ctrl_key('q'));
+        handle_key(&mut editor, ctrl_key('w'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "write keep\u{17}");
+        assert_eq!(editor.command_line.display(), ":write keep^W");
+        assert_eq!(
+            editor.command_line.cursor,
+            "write keep\u{17}".chars().count()
+        );
     }
 
     #[test]

@@ -42,6 +42,8 @@ pub enum CommandModeAction {
     HistoryToggle,
     /// Insert the next typed register into the command line
     InsertRegister,
+    /// Insert the next typed key literally into the command line
+    InsertLiteral,
     /// Show available command-line completions
     ListCompletions,
     /// Complete the longest common command-line completion prefix
@@ -567,6 +569,7 @@ fn parse_command_mode_action(action: &str) -> Option<CommandModeAction> {
     match action.trim().to_lowercase().as_str() {
         "history_toggle" => Some(CommandModeAction::HistoryToggle),
         "insert_register" => Some(CommandModeAction::InsertRegister),
+        "insert_literal" => Some(CommandModeAction::InsertLiteral),
         "list_completions" => Some(CommandModeAction::ListCompletions),
         "complete_longest_common_prefix" => Some(CommandModeAction::CompleteLongestCommonPrefix),
         "insert_all_completions" => Some(CommandModeAction::InsertAllCompletions),
@@ -749,6 +752,26 @@ mod tests {
         let key = parse_key_notation("<C-r>").unwrap();
         assert_eq!(key.code, KeyCode::Char('r'));
         assert_eq!(key.modifiers, KeyModifiers::CONTROL);
+    }
+
+    #[test]
+    fn default_command_mappings_include_literal_next_char() {
+        use super::super::KeymapSettings;
+
+        let (lookup, errors) = KeymapLookup::from_settings(&KeymapSettings::default());
+        assert!(errors.is_empty(), "default keymap should parse cleanly");
+
+        let ctrl_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+        let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            lookup.get_command_action(ctrl_v),
+            Some(CommandModeAction::InsertLiteral)
+        );
+        assert_eq!(
+            lookup.get_command_action(ctrl_q),
+            Some(CommandModeAction::InsertLiteral)
+        );
     }
 
     #[test]
