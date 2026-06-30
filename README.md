@@ -46,6 +46,19 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install anthonyamaro15/nevi/nevi
+```
+
+Or tap first:
+
+```bash
+brew tap anthonyamaro15/nevi
+brew install nevi
+```
+
 ### Requirements
 
 Nevi is currently macOS-only.
