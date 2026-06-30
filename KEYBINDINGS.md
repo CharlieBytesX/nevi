@@ -480,6 +480,8 @@ Record and replay sequences of commands.
 | `p` | Paste over selection |
 | `o` | Swap to other end of selection |
 | `O` | Swap to other corner in visual block mode |
+| `I` | Insert before the visual block on each selected line |
+| `A` | Append after the visual block on each selected line |
 | `>` | Indent selection |
 | `<` | Dedent selection |
 | `gc` | Toggle comment on selection |

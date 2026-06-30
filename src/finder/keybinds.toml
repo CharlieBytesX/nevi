@@ -1394,6 +1394,20 @@ desc = "Go to other corner (block mode)"
 status = "implemented"
 vim_default = true
 
+[[visual.editing]]
+key = "I"
+action = "visual_block_insert"
+desc = "Insert before each selected block line"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "A"
+action = "visual_block_append"
+desc = "Append after each selected block line"
+status = "implemented"
+vim_default = true
+
 # ============================================================================
 # LEADER MAPPINGS (ALL IMPLEMENTED)
 # ============================================================================
