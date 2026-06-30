@@ -10882,7 +10882,7 @@ mod tests {
     }
 
     #[test]
-    fn configdefaults_command_opens_default_config_preview() {
+    fn configdefaults_command_opens_default_config_buffer() {
         let mut editor = Editor::default();
 
         execute_command(
@@ -10890,20 +10890,16 @@ mod tests {
             crate::commands::parse_command("ConfigDefaults"),
         );
 
-        let preview = editor
-            .markdown_preview
-            .as_ref()
-            .expect("config defaults preview");
-        assert_eq!(preview.title, "Config Defaults");
-        let text = preview
-            .lines
-            .iter()
-            .map(|line| line.plain_text())
-            .collect::<Vec<_>>()
-            .join("\n");
+        assert!(editor.markdown_preview.is_none());
+        assert_eq!(editor.buffer().display_name(), "[config-defaults]");
+        assert!(editor.buffer().is_read_only());
+        assert!(editor.buffer().path.is_none());
+        assert!(!editor.buffer().dirty);
+        let text = editor.buffer().content();
         assert!(text.contains("# Nevi Configuration"));
         assert!(text.contains("show_leader_popup"));
         assert!(text.contains("explorer"));
+        assert!(!text.starts_with("```toml"));
     }
 
     #[test]

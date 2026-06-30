@@ -1785,19 +1785,13 @@ impl Editor {
         Ok(path)
     }
 
-    /// Open the latest generated default config template in the read-only preview overlay.
+    /// Open the latest generated default config template in a read-only virtual buffer.
     pub fn open_config_defaults_preview(&mut self) {
-        let source = format!(
-            "```toml\n{}\n```",
-            crate::config::default_config_template_text()
+        self.open_virtual_read_only_buffer(
+            "[config-defaults]",
+            crate::config::default_config_template_text(),
+            Some("config.toml"),
         );
-        let rendered = crate::markdown_preview::render_markdown(&source);
-        let width = crate::markdown_preview::preview_content_width(self.term_width);
-        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::with_title(
-            rendered,
-            width,
-            "Config Defaults",
-        ));
     }
 
     /// Close the floating Markdown preview.
@@ -10408,6 +10402,29 @@ mod tests {
         assert!(editor.switch_to_buffer(0));
         assert_eq!(editor.buffer().display_name(), "[scratch]");
         assert_eq!(editor.syntax.language_name(), Some("markdown"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn config_defaults_buffer_uses_toml_syntax_hint_after_buffer_switch() {
+        let tmp = unique_temp_dir("nevi_config_defaults_syntax_switch");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let rust = tmp.join("main.rs");
+        std::fs::write(&rust, "fn main() {}\n").expect("write rust");
+
+        let mut editor = Editor::default();
+        editor.open_config_defaults_preview();
+        assert_eq!(editor.buffer().display_name(), "[config-defaults]");
+        assert!(editor.buffer().is_read_only());
+        assert_eq!(editor.syntax.language_name(), Some("toml"));
+
+        editor.open_file(rust).expect("open rust file");
+        assert_eq!(editor.syntax.language_name(), Some("rust"));
+
+        assert!(editor.switch_to_buffer(0));
+        assert_eq!(editor.buffer().display_name(), "[config-defaults]");
+        assert_eq!(editor.syntax.language_name(), Some("toml"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

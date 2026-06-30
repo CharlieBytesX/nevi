@@ -145,7 +145,7 @@ nevi file1.rs file2.rs
 - `:wq` - Save and quit
 - `:checkhealth` / `:Health` - Open editor health report in a read-only `[health]` buffer
 - `:ConfigOpen` / `:config` - Open your user config file
-- `:ConfigDefaults` - View the latest built-in default config template
+- `:ConfigDefaults` - View the latest built-in default config in a read-only `[config-defaults]` buffer
 - `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
@@ -185,8 +185,9 @@ enabled = true
 
 Run `:ConfigOpen` (or `:config`) to open your user config file from inside
 Nevi. Run `:ConfigDefaults` to view the latest built-in default config template
-without changing your existing config. Existing config files stay user-owned;
-Nevi does not rewrite them when new defaults are added.
+in a read-only `[config-defaults]` buffer without changing your existing config.
+Existing config files stay user-owned; Nevi does not rewrite them when new
+defaults are added.
 
 See the generated config file at `~/.config/nevi/config.toml` for all available
 options with documentation.

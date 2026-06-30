@@ -932,7 +932,7 @@ While typing an Ex command after `:`.
 | `:LazyGit` / `:lg` | Open lazygit |
 | `:checkhealth` / `:CheckHealth` / `:Health` | Open read-only `[health]` report with config, keymap, profiling, LSP, and external tools |
 | `:ConfigOpen` / `:config` / `:configopen` | Open the user config file, creating it first if needed |
-| `:ConfigDefaults` / `:configdefaults` | View the latest built-in default config template without changing user config |
+| `:ConfigDefaults` / `:configdefaults` | Open read-only `[config-defaults]` buffer with latest built-in default config |
 | `:!{command}` | Run external shell command |
 | `:Terminal` / `:term` | Toggle floating terminal |
 | `:TerminalNew [name]` / `:termnew [name]` | Create floating terminal session |

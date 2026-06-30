@@ -609,7 +609,7 @@ const COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
         command: "ConfigDefaults",
         aliases: &["configdefaults", "defaults"],
-        description: "Open latest default config template",
+        description: "Open latest default config in read-only buffer",
         takes_args: false,
     },
     CommandSpec {
