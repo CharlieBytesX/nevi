@@ -27,6 +27,7 @@ fn profile_enabled_from_env() -> bool {
     nevi::health::profile_enabled_from_env()
 }
 
+#[cfg(test)]
 fn profile_enabled_from_value(value: Option<&str>) -> bool {
     nevi::health::profile_enabled_from_value(value)
 }
@@ -125,7 +126,38 @@ fn request_selected_completion_resolve(
     let _ = mlsp.completion_resolve(&path, raw_data, item_id, label);
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CliStartupAction {
+    PrintVersion,
+    LaunchEditor(Option<PathBuf>),
+}
+
+fn version_output() -> String {
+    format!("nevi {}", env!("CARGO_PKG_VERSION"))
+}
+
+fn startup_action_from_args<I, S>(args: I) -> CliStartupAction
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut args = args.into_iter();
+    match args.next() {
+        Some(arg) if matches!(arg.as_ref(), "--version" | "-V") => CliStartupAction::PrintVersion,
+        Some(arg) => CliStartupAction::LaunchEditor(Some(PathBuf::from(arg.as_ref()))),
+        None => CliStartupAction::LaunchEditor(None),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    let arg_path = match startup_action_from_args(env::args().skip(1)) {
+        CliStartupAction::PrintVersion => {
+            println!("{}", version_output());
+            return Ok(());
+        }
+        CliStartupAction::LaunchEditor(path) => path,
+    };
+
     // Profiling is opt-in with NEVI_PROFILE=1/true/yes/on.
     let profile_enabled = profile_enabled_from_env();
     let mut profile_file = if profile_enabled {
@@ -193,7 +225,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Check command line argument - could be file or directory
-    let arg_path = env::args().nth(1).map(PathBuf::from);
     let mut initial_file: Option<PathBuf> = None;
     let mut open_file_picker = false;
 
@@ -2205,7 +2236,7 @@ mod tests {
     use super::{
         apply_edits_to_file, diagnostic_to_lsp_offsets, editor_lsp_cursor_col, editor_lsp_line_len,
         lsp_completion_response_matches_current_cursor, lsp_response_matches_current_buffer,
-        profile_enabled_from_value,
+        profile_enabled_from_value, startup_action_from_args, CliStartupAction,
     };
     use nevi::lsp::types::{Diagnostic, DiagnosticSeverity, TextEdit};
     use nevi::Editor;
@@ -2256,6 +2287,26 @@ mod tests {
         assert!(profile_enabled_from_value(Some("true")));
         assert!(profile_enabled_from_value(Some("YES")));
         assert!(profile_enabled_from_value(Some("on")));
+    }
+
+    #[test]
+    fn cli_version_flags_print_version_and_exit() {
+        assert_eq!(
+            startup_action_from_args(["--version"]),
+            CliStartupAction::PrintVersion
+        );
+        assert_eq!(
+            startup_action_from_args(["-V"]),
+            CliStartupAction::PrintVersion
+        );
+    }
+
+    #[test]
+    fn cli_regular_argument_opens_file_path() {
+        assert_eq!(
+            startup_action_from_args(["README.md"]),
+            CliStartupAction::LaunchEditor(Some(PathBuf::from("README.md")))
+        );
     }
 
     #[test]

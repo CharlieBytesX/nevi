@@ -60,6 +60,12 @@ Required at runtime:
 
 - A terminal emulator
 
+Verify an installed binary with:
+
+```bash
+nevi --version
+```
+
 Not required:
 
 - `ripgrep`, `grep`, `fd`, `fzf`, or the `tree-sitter` CLI. Nevi's file finder,
