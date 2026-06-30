@@ -208,6 +208,15 @@ pub struct LastVisualSelection {
     pub cursor_col: usize,
 }
 
+/// Pending Visual Block insert/append replay state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisualBlockEdit {
+    pub top: usize,
+    pub bottom: usize,
+    pub insert_col: usize,
+    pub primary_line: usize,
+}
+
 impl VisualSelection {
     pub fn new(line: usize, col: usize) -> Self {
         Self {
@@ -1024,6 +1033,8 @@ pub struct Editor {
     pub marks: Marks,
     /// Last visual selection for gv command
     pub last_visual_selection: Option<LastVisualSelection>,
+    /// Pending block insert/append started from Visual Block mode.
+    pub pending_visual_block_edit: Option<VisualBlockEdit>,
     /// Macro recording and playback state
     pub macros: MacroState,
     /// Last insert position for `gi` command (line, col)
@@ -1515,6 +1526,7 @@ impl Editor {
             markdown_preview: None,
             marks: Marks::new(),
             last_visual_selection: None,
+            pending_visual_block_edit: None,
             macros: MacroState::new(),
             last_insert_position: None,
             last_inserted_text: None,
@@ -4069,6 +4081,7 @@ impl Editor {
     /// Exit to normal mode
     pub fn enter_normal_mode(&mut self) {
         if self.mode == Mode::Insert {
+            self.replay_pending_visual_block_edit();
             self.finish_insert_session();
         }
 
@@ -4087,6 +4100,31 @@ impl Editor {
             self.cursor.col -= 1;
         }
         self.clamp_cursor();
+    }
+
+    fn replay_pending_visual_block_edit(&mut self) {
+        let Some(block_edit) = self.pending_visual_block_edit.take() else {
+            return;
+        };
+        let inserted_text = self.current_inserted_text.clone();
+        if inserted_text.is_empty() {
+            return;
+        }
+
+        for line_idx in (block_edit.top..=block_edit.bottom).rev() {
+            if line_idx == block_edit.primary_line {
+                continue;
+            }
+
+            let line_len = self.buffers[self.current_buffer_idx].line_len(line_idx);
+            let insert_col = block_edit.insert_col.min(line_len);
+            self.undo_stack.record_change(Change::insert(
+                line_idx,
+                insert_col,
+                inserted_text.clone(),
+            ));
+            self.buffers[self.current_buffer_idx].insert_str(line_idx, insert_col, &inserted_text);
+        }
     }
 
     /// Insert a character at cursor position
@@ -5927,6 +5965,51 @@ impl Editor {
     pub fn enter_visual_block_mode(&mut self) {
         self.mode = Mode::VisualBlock;
         self.visual = VisualSelection::new(self.cursor.line, self.cursor.col);
+    }
+
+    /// Enter insert mode for a Visual Block `I` or `A` edit.
+    pub fn enter_visual_block_insert_mode(&mut self, append: bool) {
+        if self.mode != Mode::VisualBlock {
+            return;
+        }
+
+        let (top, left, bottom, right) = self
+            .visual
+            .get_block_range(self.cursor.line, self.cursor.col);
+        let insert_col = if append {
+            right.saturating_add(1)
+        } else {
+            left
+        };
+        let primary_line = top.min(
+            self.buffers[self.current_buffer_idx]
+                .len_lines()
+                .saturating_sub(1),
+        );
+        let primary_col =
+            insert_col.min(self.buffers[self.current_buffer_idx].line_len(primary_line));
+
+        self.last_visual_selection = Some(LastVisualSelection {
+            mode: self.mode,
+            anchor_line: self.visual.anchor_line,
+            anchor_col: self.visual.anchor_col,
+            cursor_line: self.cursor.line,
+            cursor_col: self.cursor.col,
+        });
+        self.pending_visual_block_edit = Some(VisualBlockEdit {
+            top,
+            bottom,
+            insert_col,
+            primary_line,
+        });
+
+        self.mode = Mode::Insert;
+        self.begin_insert_session();
+        self.cursor.line = primary_line;
+        self.cursor.col = primary_col;
+        self.last_insert_position = Some((self.cursor.line, self.cursor.col));
+        self.begin_change();
+        self.scroll_to_cursor();
     }
 
     /// Exit visual mode

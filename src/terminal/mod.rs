@@ -8135,6 +8135,12 @@ fn handle_visual_mode(editor: &mut Editor, key: KeyEvent) {
             let register = editor.input_state.take_register();
             editor.visual_paste(register);
         }
+        (KeyModifiers::SHIFT, KeyCode::Char('I')) if editor.mode == Mode::VisualBlock => {
+            editor.enter_visual_block_insert_mode(false);
+        }
+        (KeyModifiers::SHIFT, KeyCode::Char('A')) if editor.mode == Mode::VisualBlock => {
+            editor.enter_visual_block_insert_mode(true);
+        }
         (KeyModifiers::SHIFT, KeyCode::Char('S')) => {
             editor.input_state.pending_visual_surround = true;
         }
@@ -12030,6 +12036,57 @@ mod tests {
         );
         assert_eq!((editor.cursor.line, editor.cursor.col), (1, 0));
         assert_eq!(editor.get_visual_range(), (0, 0, 1, 2));
+    }
+
+    #[test]
+    fn visual_block_i_inserts_typed_text_on_each_selected_line() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("alpha\nbravo\ncharlie\n");
+        editor.cursor.col = 1;
+
+        handle_key(&mut editor, ctrl_key('v'));
+        handle_key(&mut editor, key('j'));
+        handle_key(&mut editor, key('j'));
+        handle_key(&mut editor, shift_key('I'));
+
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 1));
+
+        handle_key(&mut editor, key('X'));
+        handle_key(&mut editor, key('Y'));
+        handle_key(&mut editor, esc_key());
+
+        assert_eq!(editor.buffer().content(), "aXYlpha\nbXYravo\ncXYharlie\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 2));
+
+        handle_key(&mut editor, key('u'));
+
+        assert_eq!(editor.buffer().content(), "alpha\nbravo\ncharlie\n");
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 1));
+    }
+
+    #[test]
+    fn visual_block_a_appends_typed_text_after_each_selected_block() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("alpha\nbravo\ncharlie\n");
+        editor.cursor.col = 1;
+
+        handle_key(&mut editor, ctrl_key('v'));
+        handle_key(&mut editor, key('j'));
+        handle_key(&mut editor, key('j'));
+        handle_key(&mut editor, key('l'));
+        handle_key(&mut editor, shift_key('A'));
+
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 3));
+
+        handle_key(&mut editor, key('_'));
+        handle_key(&mut editor, esc_key());
+
+        assert_eq!(editor.buffer().content(), "alp_ha\nbra_vo\ncha_rlie\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 3));
     }
 
     #[test]

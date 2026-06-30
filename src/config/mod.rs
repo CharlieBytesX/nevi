@@ -1198,6 +1198,7 @@ fn default_config_template() -> &'static str {
 # p                - Paste over selection
 # o                - Swap selection end
 # O                - Swap to other corner in visual block mode
+# I/A              - Insert/append across selected visual block lines
 # >/<              - Indent/dedent selection
 # gc               - Toggle comment
 # S{char}          - Surround selection
