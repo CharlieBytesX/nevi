@@ -9613,6 +9613,28 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             }
         }
 
+        Command::ProjectReplace {
+            pattern,
+            replacement,
+            global,
+        } => match editor.preview_project_replace(&pattern, &replacement, global) {
+            Ok(count) => {
+                if count > 0 {
+                    CommandResult::Message(format!("Previewing {} project replacement(s)", count))
+                } else {
+                    CommandResult::Message(format!("Pattern not found in project: {}", pattern))
+                }
+            }
+            Err(message) => CommandResult::Error(message),
+        },
+
+        Command::ProjectReplaceApply => match editor.apply_project_replace_preview() {
+            Ok(count) => {
+                CommandResult::Message(format!("Applied {} project replacement(s)", count))
+            }
+            Err(message) => CommandResult::Error(message),
+        },
+
         Command::NewFile(path) => {
             // Resolve path relative to project root
             let full_path = if path.is_absolute() {

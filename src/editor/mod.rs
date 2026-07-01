@@ -1036,6 +1036,8 @@ pub struct Editor {
     pub theme_picker: Option<ThemePicker>,
     /// Floating rendered Markdown preview state.
     pub markdown_preview: Option<crate::markdown_preview::MarkdownPreviewState>,
+    /// Last project-wide replace preview, pending explicit apply.
+    project_replace_preview: Option<crate::project_replace::ProjectReplacePreview>,
     /// Marks for navigation (m{a-z}, '{a-z}, `{a-z})
     pub marks: Marks,
     /// Last visual selection for gv command
@@ -1531,6 +1533,7 @@ impl Editor {
             theme_manager,
             theme_picker: None,
             markdown_preview: None,
+            project_replace_preview: None,
             marks: Marks::new(),
             last_visual_selection: None,
             pending_visual_block_edit: None,
@@ -1730,6 +1733,118 @@ impl Editor {
     pub fn open_health_report(&mut self) {
         let report = crate::health::collect_health_report(&self.settings, &self.languages_config);
         self.open_virtual_read_only_buffer("[health]", &report, Some("health.md"));
+    }
+
+    /// Build a project-wide replace preview and open it as a read-only buffer.
+    pub fn preview_project_replace(
+        &mut self,
+        pattern: &str,
+        replacement: &str,
+        global: bool,
+    ) -> Result<usize, String> {
+        let root = self.working_directory();
+        let files = crate::finder::FilePicker::from_settings(&self.settings.finder)
+            .list_files(&root)
+            .into_iter()
+            .map(|item| item.path);
+        let preview = crate::project_replace::build_project_replace_preview(
+            &root,
+            files,
+            pattern,
+            replacement,
+            global,
+            crate::project_replace::PROJECT_REPLACE_MAX_MATCHES,
+        )?;
+        let replacement_count = preview.total_replacements();
+        let rendered = preview.render_markdown();
+        self.project_replace_preview = if replacement_count > 0 {
+            Some(preview)
+        } else {
+            None
+        };
+        self.open_virtual_read_only_buffer(
+            "[project-replace]",
+            &rendered,
+            Some("project-replace.md"),
+        );
+        Ok(replacement_count)
+    }
+
+    /// Apply the last project-wide replace preview.
+    pub fn apply_project_replace_preview(&mut self) -> Result<usize, String> {
+        let preview = self
+            .project_replace_preview
+            .clone()
+            .ok_or_else(|| "No project replace preview to apply".to_string())?;
+
+        if preview.truncated {
+            return Err(
+                "Project replace preview was truncated; refine the pattern before applying"
+                    .to_string(),
+            );
+        }
+
+        let replacement_count = preview.total_replacements();
+        if replacement_count == 0 {
+            return Err("Project replace preview has no replacements".to_string());
+        }
+
+        for file in &preview.files {
+            for buffer in &self.buffers {
+                if buffer.dirty && buffer.path.as_ref() == Some(&file.path) {
+                    return Err(format!(
+                        "Project replace blocked: {} has unsaved changes",
+                        project_replace_display_path(&preview.root, &file.path)
+                    ));
+                }
+            }
+        }
+
+        for file in &preview.files {
+            let current = std::fs::read_to_string(&file.path).map_err(|err| {
+                format!(
+                    "Project replace blocked: failed to read {}: {}",
+                    project_replace_display_path(&preview.root, &file.path),
+                    err
+                )
+            })?;
+            if current != file.original_content {
+                return Err(format!(
+                    "Project replace blocked: {} changed since preview",
+                    project_replace_display_path(&preview.root, &file.path)
+                ));
+            }
+        }
+
+        for file in &preview.files {
+            std::fs::write(&file.path, &file.new_content).map_err(|err| {
+                format!(
+                    "Project replace failed writing {}: {}",
+                    project_replace_display_path(&preview.root, &file.path),
+                    err
+                )
+            })?;
+        }
+
+        for file in &preview.files {
+            for idx in 0..self.buffers.len() {
+                if self.buffers[idx].path.as_ref() == Some(&file.path) && !self.buffers[idx].dirty {
+                    self.buffers[idx].reload().map_err(|err| {
+                        format!(
+                            "Project replace wrote {}, but reload failed: {}",
+                            project_replace_display_path(&preview.root, &file.path),
+                            err
+                        )
+                    })?;
+                    self.reset_undo_stack_for_buffer(idx);
+                }
+            }
+        }
+
+        self.project_replace_preview = None;
+        self.refresh_git_state();
+        self.sync_syntax_to_current_buffer();
+        Ok(replacement_count)
     }
 
     /// Open named content that is not backed by a file and cannot be edited.
@@ -9982,6 +10097,13 @@ impl Default for Editor {
     }
 }
 
+fn project_replace_display_path(root: &std::path::Path, path: &std::path::Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Editor, JumpList, Mode, SplitLayout};
@@ -10453,6 +10575,115 @@ mod tests {
             Some("Buffer is read-only")
         );
         assert!(!editor.buffer().dirty);
+    }
+
+    #[test]
+    fn project_replace_preview_opens_read_only_buffer_without_mutating_files() {
+        let tmp = unique_temp_dir("nevi_project_replace_editor_preview");
+        std::fs::create_dir_all(tmp.join("src")).expect("create temp tree");
+        let first = tmp.join("src/first.txt");
+        let second = tmp.join("second.txt");
+        std::fs::write(&first, "old one\nold old\n").expect("write first");
+        std::fs::write(&second, "keep old\n").expect("write second");
+
+        let mut editor = Editor::default();
+        editor.set_project_root(tmp.clone());
+
+        let count = editor
+            .preview_project_replace("old", "new", true)
+            .expect("preview project replace");
+
+        assert_eq!(count, 4);
+        assert_eq!(editor.buffer().display_name(), "[project-replace]");
+        assert!(editor.buffer().is_read_only());
+        let content = editor.buffer().content();
+        assert!(content.contains("# Project Replace Preview"));
+        assert!(content.contains("src/first.txt"));
+        assert!(content.contains("second.txt"));
+        assert!(content.contains("Apply with `:ProjectReplaceApply`"));
+        assert_eq!(
+            std::fs::read_to_string(&first).expect("read first"),
+            "old one\nold old\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&second).expect("read second"),
+            "keep old\n"
+        );
+    }
+
+    #[test]
+    fn project_replace_apply_writes_last_preview() {
+        let tmp = unique_temp_dir("nevi_project_replace_editor_apply");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("note.txt");
+        std::fs::write(&path, "old one\nold old\n").expect("write file");
+
+        let mut editor = Editor::default();
+        editor.set_project_root(tmp.clone());
+
+        editor
+            .preview_project_replace("old", "new", true)
+            .expect("preview project replace");
+        let count = editor
+            .apply_project_replace_preview()
+            .expect("apply project replace");
+
+        assert_eq!(count, 3);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read file"),
+            "new one\nnew new\n"
+        );
+    }
+
+    #[test]
+    fn project_replace_apply_blocks_dirty_open_matching_buffer() {
+        let tmp = unique_temp_dir("nevi_project_replace_editor_dirty");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("note.txt");
+        std::fs::write(&path, "old one\n").expect("write file");
+
+        let mut editor = Editor::default();
+        editor.set_project_root(tmp.clone());
+        editor.open_file(path.clone()).expect("open file");
+        editor.replace_buffer_content("old local edit\n");
+
+        editor
+            .preview_project_replace("old", "new", true)
+            .expect("preview project replace");
+        let err = editor
+            .apply_project_replace_preview()
+            .expect_err("dirty matching buffer should block apply");
+
+        assert!(err.contains("unsaved changes"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read file"),
+            "old one\n"
+        );
+    }
+
+    #[test]
+    fn project_replace_apply_blocks_file_changed_since_preview() {
+        let tmp = unique_temp_dir("nevi_project_replace_editor_stale");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("note.txt");
+        std::fs::write(&path, "old one\n").expect("write file");
+
+        let mut editor = Editor::default();
+        editor.set_project_root(tmp.clone());
+        editor
+            .preview_project_replace("old", "new", true)
+            .expect("preview project replace");
+        std::fs::write(&path, "external old edit\n").expect("write external edit");
+
+        let err = editor
+            .apply_project_replace_preview()
+            .expect_err("stale preview should block apply");
+
+        assert!(err.contains("changed since preview"));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read file"),
+            "external old edit\n"
+        );
     }
 
     #[test]

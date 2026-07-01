@@ -34,6 +34,7 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 - **Tree-sitter syntax highlighting** - Fast, accurate highlighting for Rust, TypeScript, JavaScript, Python, CSS, JSON, TOML, HTML, Markdown
 - **Theme selection** - Multiple built-in colorschemes with easy switching
 - **Fuzzy file finder** - Telescope-style file and content search
+- **Previewed project replace** - Project-wide literal replace with a read-only preview and explicit apply step
 - **Keybinding cheatsheet** - Searchable `:Keymaps` picker (`<Space>fk`) listing every binding with a description
 - **GitHub Copilot integration** - AI-powered completions
 - **File explorer** - Built-in tree view
@@ -148,6 +149,8 @@ nevi file1.rs file2.rs
 - `:ConfigOpen` / `:config` - Open your user config file
 - `:ConfigDefaults` - View the latest built-in default config in a read-only `[config-defaults]` buffer
 - `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
+- `:ProjectReplace/{pattern}/{replacement}/g` - Preview project-wide literal replace
+- `:ProjectReplaceApply` - Apply the last project replace preview
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
 - `<Space>fl` - Find lines in current buffer

@@ -15,6 +15,7 @@ pub mod input;
 pub mod lsp;
 pub mod markdown_preview;
 pub mod perf;
+pub mod project_replace;
 pub mod syntax;
 pub mod terminal;
 pub mod theme;
