@@ -55,6 +55,8 @@ pub enum Command {
     FindFiles,
     /// :FindBuffers - Open fuzzy finder for buffers
     FindBuffers,
+    /// :BufferSearch - Open fuzzy finder for lines in current buffer
+    BufferSearch,
     /// :LiveGrep - Open fuzzy finder for live grep
     LiveGrep,
     /// :SearchWord - Live grep with word under cursor
@@ -348,6 +350,12 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         command: "FindBuffers",
         aliases: &["findbuffers", "fb", "buffers"],
         description: "Open buffer finder",
+        takes_args: false,
+    },
+    CommandSpec {
+        command: "BufferSearch",
+        aliases: &["buffersearch", "findlines", "lines", "bl"],
+        description: "Find lines in current buffer",
         takes_args: false,
     },
     CommandSpec {
@@ -937,6 +945,9 @@ pub fn parse_command(input: &str) -> Command {
         // Fuzzy finder commands
         "FindFiles" | "findfiles" | "ff" | "files" => Command::FindFiles,
         "FindBuffers" | "findbuffers" | "fb" | "buffers" => Command::FindBuffers,
+        "BufferSearch" | "buffersearch" | "FindLines" | "findlines" | "Lines" | "lines" | "bl" => {
+            Command::BufferSearch
+        }
         "LiveGrep" | "livegrep" | "grep" | "rg" => Command::LiveGrep,
         "SearchWord" | "searchword" | "sw" => Command::SearchWord,
         "FindDiagnostics" | "finddiagnostics" | "diagnostics" | "diag" | "fd" => {
@@ -1812,6 +1823,17 @@ mod tests {
         assert!(matches!(parse_command("Keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keys"), Command::Keymaps));
+    }
+
+    #[test]
+    fn buffer_search_command_is_parseable() {
+        assert!(matches!(
+            parse_command("BufferSearch"),
+            Command::BufferSearch
+        ));
+        assert!(matches!(parse_command("FindLines"), Command::BufferSearch));
+        assert!(matches!(parse_command("Lines"), Command::BufferSearch));
+        assert!(matches!(parse_command("bl"), Command::BufferSearch));
     }
 
     #[test]
