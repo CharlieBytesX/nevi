@@ -917,6 +917,15 @@ While typing an Ex command after `:`.
 | `:noh` / `:nohlsearch` | Clear search highlights |
 | `:s/{pattern}/{replacement}/` | Substitute on current line |
 | `:%s/{pattern}/{replacement}/` | Substitute in entire file |
+| `:ProjectReplace/{pattern}/{replacement}/[g]` / `:PReplace/{pattern}/{replacement}/[g]` | Preview project-wide literal replace in a read-only `[project-replace]` buffer |
+| `:ProjectReplaceApply` / `:PReplaceApply` | Apply the last project replace preview |
+
+`ProjectReplace` is preview-first. It does not write files until
+`:ProjectReplaceApply` is run. V1 uses literal matching, respects the file
+finder ignore settings, skips non-UTF-8 files, and blocks apply if a matched
+file has unsaved changes or changed on disk after the preview was created. Use
+an alternate delimiter such as `#` when the pattern or replacement contains `/`,
+for example `:ProjectReplace#/api/v1#/api/v2#g`.
 
 ### LSP
 

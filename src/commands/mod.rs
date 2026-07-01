@@ -82,6 +82,17 @@ pub enum Command {
         /// Global flag (replace all on line vs first only)
         global: bool,
     },
+    /// :ProjectReplace/pattern/replacement/flags - Preview project-wide replace
+    ProjectReplace {
+        /// Search pattern
+        pattern: String,
+        /// Replacement string
+        replacement: String,
+        /// Global flag (replace all on line vs first only)
+        global: bool,
+    },
+    /// :ProjectReplaceApply - Apply the last project-wide replace preview
+    ProjectReplaceApply,
     /// :new or :touch - Create a new file
     NewFile(PathBuf),
     /// :delete or :rm - Delete current file (requires confirmation)
@@ -411,6 +422,18 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         aliases: &[],
         description: "Substitute in entire file",
         takes_args: true,
+    },
+    CommandSpec {
+        command: "ProjectReplace",
+        aliases: &["projectreplace", "PReplace", "preplace"],
+        description: "Preview project-wide replace",
+        takes_args: true,
+    },
+    CommandSpec {
+        command: "ProjectReplaceApply",
+        aliases: &["projectreplaceapply", "PReplaceApply", "preplaceapply"],
+        description: "Apply last project replace preview",
+        takes_args: false,
     },
     CommandSpec {
         command: "new",
@@ -883,6 +906,11 @@ pub fn parse_command(input: &str) -> Command {
         return sub_cmd;
     }
 
+    // Handle project replace command: ProjectReplace/pattern/replacement/flags
+    if let Some(replace_cmd) = parse_project_replace_command(input) {
+        return replace_cmd;
+    }
+
     // Split into command and arguments
     let mut parts = input.splitn(2, char::is_whitespace);
     let cmd = parts.next().unwrap_or("");
@@ -959,6 +987,11 @@ pub fn parse_command(input: &str) -> Command {
 
         // Clear search highlight
         "noh" | "nohlsearch" => Command::NoHighlight,
+
+        // Project-wide replace
+        "ProjectReplaceApply" | "projectreplaceapply" | "PReplaceApply" | "preplaceapply" => {
+            Command::ProjectReplaceApply
+        }
 
         // File management commands
         "new" | "touch" => {
@@ -1130,6 +1163,35 @@ fn parse_substitute_command(input: &str) -> Option<Command> {
         pattern,
         replacement,
         global,
+    })
+}
+
+/// Parse a project replace command: ProjectReplace/pattern/replacement/flags
+fn parse_project_replace_command(input: &str) -> Option<Command> {
+    let rest = ["ProjectReplace", "projectreplace", "PReplace", "preplace"]
+        .iter()
+        .find_map(|prefix| input.strip_prefix(prefix))?
+        .trim_start();
+
+    if rest.is_empty() {
+        return None;
+    }
+
+    let delimiter = rest.chars().next()?;
+    let rest = &rest[delimiter.len_utf8()..];
+    let parts = split_by_delimiter(rest, delimiter);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let pattern = unescape_delimiter(&parts[0], delimiter);
+    let replacement = unescape_delimiter(&parts[1], delimiter);
+    let flags = if parts.len() > 2 { &parts[2] } else { "" };
+
+    Some(Command::ProjectReplace {
+        pattern,
+        replacement,
+        global: flags.contains('g'),
     })
 }
 
@@ -1834,6 +1896,50 @@ mod tests {
         assert!(matches!(parse_command("FindLines"), Command::BufferSearch));
         assert!(matches!(parse_command("Lines"), Command::BufferSearch));
         assert!(matches!(parse_command("bl"), Command::BufferSearch));
+    }
+
+    #[test]
+    fn project_replace_commands_are_parseable_and_listed() {
+        match parse_command("ProjectReplace/foo/bar/g") {
+            Command::ProjectReplace {
+                pattern,
+                replacement,
+                global,
+            } => {
+                assert_eq!(pattern, "foo");
+                assert_eq!(replacement, "bar");
+                assert!(global);
+            }
+            other => panic!("expected ProjectReplace command, got {other:?}"),
+        }
+
+        match parse_command("PReplace#/api/v1#/api/v2#g") {
+            Command::ProjectReplace {
+                pattern,
+                replacement,
+                global,
+            } => {
+                assert_eq!(pattern, "/api/v1");
+                assert_eq!(replacement, "/api/v2");
+                assert!(global);
+            }
+            other => panic!("expected ProjectReplace command, got {other:?}"),
+        }
+
+        assert!(matches!(
+            parse_command("ProjectReplaceApply"),
+            Command::ProjectReplaceApply
+        ));
+
+        let rows = command_cheatsheet_rows();
+        assert!(
+            rows.iter().any(|(name, _)| name == ":ProjectReplace"),
+            "expected :ProjectReplace in command cheatsheet rows"
+        );
+        assert!(
+            rows.iter().any(|(name, _)| name == ":ProjectReplaceApply"),
+            "expected :ProjectReplaceApply in command cheatsheet rows"
+        );
     }
 
     #[test]
