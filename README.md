@@ -27,7 +27,9 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 
 ## Features
 
-> **Note:** Currently macOS only. Linux and Windows support planned.
+> **Note:** Nevi currently supports macOS and Linux from source. Homebrew is
+> available for macOS. Linux release tarballs and distro packages are planned.
+> Windows support is planned.
 
 - **Vim/neovim keybindings** - Most common keybinds implemented, more being added regularly
 - **Built-in LSP** - rust-analyzer, typescript-language-server, pyright, and more
@@ -47,7 +49,7 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 
 ## Installation
 
-### Homebrew
+### Homebrew (macOS)
 
 ```bash
 brew install anthonyamaro15/nevi/nevi
@@ -60,11 +62,49 @@ brew tap anthonyamaro15/nevi
 brew install nevi
 ```
 
+### Linux
+
+Linux users can build from source or install directly from GitHub with Cargo.
+
+Install system build dependencies first:
+
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y build-essential cmake pkg-config libssl-dev zlib1g-dev \
+  libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+# Fedora
+sudo dnf install -y gcc gcc-c++ make cmake pkgconf-pkg-config openssl-devel \
+  zlib-devel libX11-devel libxcb-devel
+
+# Arch
+sudo pacman -S --needed base-devel cmake pkgconf openssl zlib libx11 libxcb
+```
+
+Then install Nevi:
+
+```bash
+cargo install --git https://github.com/anthonyamaro15/nevi
+```
+
+Or build a local release binary:
+
+```bash
+git clone https://github.com/anthonyamaro15/nevi.git
+cd nevi
+cargo build --release
+./target/release/nevi
+```
+
+Linux binary tarballs and distro packages (`.deb`, `.rpm`, AUR) are not
+published yet.
+
 ### Requirements
 
-Nevi is currently macOS-only.
+Nevi currently supports macOS and Linux from source.
 
-Required for Homebrew install:
+Required for Homebrew install on macOS:
 
 - Homebrew. Build dependencies such as Rust are installed by the formula when
   needed.
@@ -73,7 +113,9 @@ Required to build from source:
 
 - Rust toolchain with `cargo`
 - Git, if cloning the repository with `git clone`
-- Xcode Command Line Tools if your Rust setup prompts for native build tools
+- macOS: Xcode Command Line Tools if your Rust setup prompts for native build tools
+- Linux: native build packages such as `build-essential`, `pkg-config`, and
+  OpenSSL development headers
 
 Required at runtime after any install method:
 

@@ -13,13 +13,37 @@ env:
 
 jobs:
   test:
-    name: Test on macOS
-    runs-on: macos-latest
+    name: Test on ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            libssl-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            pkg-config \
+            zlib1g-dev
 
       - name: Select stable Rust
         run: |
@@ -33,8 +57,15 @@ jobs:
       - name: Run Rust tests
         run: cargo test --quiet
 
-      - name: Install Neovim for parity smoke test
+      - name: Install Neovim for parity smoke test on macOS
+        if: runner.os == 'macOS'
         run: brew install neovim
+
+      - name: Install Neovim for parity smoke test on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y neovim
 
       - name: Run Vim oracle smoke test
         run: NEVI_VIM_ORACLE=1 cargo test vim_oracle_smoke -- --ignored --nocapture
