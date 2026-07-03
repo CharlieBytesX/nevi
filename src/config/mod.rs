@@ -647,6 +647,7 @@ pub struct LspServers {
     pub markdown: LspServerConfig,
     pub html: LspServerConfig,
     pub python: LspServerConfig,
+    pub go: LspServerConfig,
 }
 
 impl Default for LspServers {
@@ -744,6 +745,14 @@ impl Default for LspServers {
                     "pyrightconfig.json".to_string(),
                 ],
                 file_extensions: vec!["py".to_string(), "pyi".to_string(), "pyw".to_string()],
+            },
+            go: LspServerConfig {
+                enabled: true,
+                preset: None,
+                command: "gopls".to_string(),
+                args: Vec::new(),
+                root_patterns: vec!["go.work".to_string(), "go.mod".to_string()],
+                file_extensions: vec!["go".to_string()],
             },
         }
     }
@@ -1410,7 +1419,7 @@ fn default_config_template() -> &'static str {
 # ============================================================================
 # LSP servers are auto-detected and enabled by default.
 # Supported: rust-analyzer, typescript-language-server, vscode-css-language-server,
-# vscode-json-language-server, taplo, vscode-html-language-server, pyright-langserver
+# vscode-json-language-server, taplo, vscode-html-language-server, pyright-langserver, gopls
 # Optional: marksman for Markdown (disabled by default)
 #
 # To disable LSP entirely:
@@ -1553,6 +1562,7 @@ fn merge_lsp_servers_with_defaults(user: LspServers) -> LspServers {
         markdown: merge_lsp_server_config(defaults.markdown, user.markdown),
         html: merge_lsp_server_config(defaults.html, user.html),
         python: merge_lsp_server_config(defaults.python, user.python),
+        go: merge_lsp_server_config(defaults.go, user.go),
     }
 }
 
@@ -1695,6 +1705,25 @@ mod tests {
         assert_eq!(
             settings.lsp.servers.rust.preset,
             Some(LspPreset::RustAnalyzer)
+        );
+    }
+
+    #[test]
+    fn go_lsp_defaults_use_gopls() {
+        let settings = Settings::default();
+
+        assert_eq!(settings.lsp.servers.go.effective_command(), "gopls");
+        assert_eq!(
+            settings.lsp.servers.go.effective_args(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            settings.lsp.servers.go.root_patterns,
+            vec!["go.work".to_string(), "go.mod".to_string()]
+        );
+        assert_eq!(
+            settings.lsp.servers.go.file_extensions,
+            vec!["go".to_string()]
         );
     }
 
