@@ -12,6 +12,12 @@ struct OracleCase {
     keys: &'static str,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct OracleCategory {
+    name: &'static str,
+    cases: &'static [OracleCase],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct EditorSnapshot {
     lines: Vec<String>,
@@ -26,7 +32,80 @@ struct OracleComparison {
     report: String,
 }
 
-const SMOKE_CASES: &[OracleCase] = &[
+const MOTION_CASES: &[OracleCase] = &[
+    OracleCase {
+        name: "move right",
+        initial_text: "abc\n",
+        keys: "l",
+    },
+    OracleCase {
+        name: "move left",
+        initial_text: "abc\n",
+        keys: "llh",
+    },
+    OracleCase {
+        name: "move down",
+        initial_text: "alpha\nbeta\ngamma\n",
+        keys: "j",
+    },
+    OracleCase {
+        name: "move up",
+        initial_text: "alpha\nbeta\ngamma\n",
+        keys: "jjk",
+    },
+    OracleCase {
+        name: "word forward",
+        initial_text: "alpha beta gamma\n",
+        keys: "w",
+    },
+    OracleCase {
+        name: "word backward",
+        initial_text: "alpha beta gamma\n",
+        keys: "wwb",
+    },
+    OracleCase {
+        name: "word end",
+        initial_text: "alpha beta\n",
+        keys: "e",
+    },
+    OracleCase {
+        name: "line start",
+        initial_text: "alpha beta\n",
+        keys: "$0",
+    },
+    OracleCase {
+        name: "line end",
+        initial_text: "alpha beta\n",
+        keys: "$",
+    },
+    OracleCase {
+        name: "first nonblank",
+        initial_text: "  alpha\n",
+        keys: "$^",
+    },
+    OracleCase {
+        name: "file top",
+        initial_text: "alpha\nbeta\ngamma\n",
+        keys: "gg",
+    },
+    OracleCase {
+        name: "file bottom",
+        initial_text: "alpha\nbeta\ngamma\n",
+        keys: "G",
+    },
+    OracleCase {
+        name: "counted down",
+        initial_text: "alpha\nbeta\ngamma\ndelta\n",
+        keys: "3j",
+    },
+    OracleCase {
+        name: "counted word forward",
+        initial_text: "alpha beta gamma\n",
+        keys: "2w",
+    },
+];
+
+const EDITING_CASES: &[OracleCase] = &[
     OracleCase {
         name: "delete first char on second line",
         initial_text: "alpha\nbeta\n",
@@ -42,7 +121,84 @@ const SMOKE_CASES: &[OracleCase] = &[
         initial_text: "alpha\nbeta\n",
         keys: "dd",
     },
+    OracleCase {
+        name: "counted char delete",
+        initial_text: "abcdef\n",
+        keys: "4x",
+    },
+    OracleCase {
+        name: "counted line delete",
+        initial_text: "alpha\nbeta\ngamma\n",
+        keys: "2dd",
+    },
+    OracleCase {
+        name: "delete to line end",
+        initial_text: "alpha beta\n",
+        keys: "wD",
+    },
+    OracleCase {
+        name: "insert before cursor",
+        initial_text: "alpha\n",
+        keys: "iX<Esc>",
+    },
+    OracleCase {
+        name: "append after cursor",
+        initial_text: "alpha\n",
+        keys: "aX<Esc>",
+    },
+    OracleCase {
+        name: "open line below",
+        initial_text: "alpha\n",
+        keys: "ochild<Esc>",
+    },
+    OracleCase {
+        name: "open line above",
+        initial_text: "alpha\n",
+        keys: "Oparent<Esc>",
+    },
+    OracleCase {
+        name: "delete word",
+        initial_text: "alpha beta\n",
+        keys: "dw",
+    },
+    OracleCase {
+        name: "change inner word",
+        initial_text: "alpha beta\n",
+        keys: "ciwdone<Esc>",
+    },
 ];
+
+const UNDO_REDO_CASES: &[OracleCase] = &[
+    OracleCase {
+        name: "undo insert",
+        initial_text: "alpha\n",
+        keys: "A!<Esc>u",
+    },
+    OracleCase {
+        name: "redo insert",
+        initial_text: "alpha\n",
+        keys: "A!<Esc>u<C-r>",
+    },
+];
+
+const ORACLE_CATEGORIES: &[OracleCategory] = &[
+    OracleCategory {
+        name: "motions",
+        cases: MOTION_CASES,
+    },
+    OracleCategory {
+        name: "editing",
+        cases: EDITING_CASES,
+    },
+    OracleCategory {
+        name: "undo-redo",
+        cases: UNDO_REDO_CASES,
+    },
+];
+
+fn oracle_categories() -> &'static [OracleCategory] {
+    ORACLE_CATEGORIES
+}
 
 fn parse_key_sequence(input: &str) -> Result<Vec<KeyEvent>, String> {
     let mut keys = Vec::new();
@@ -185,13 +341,59 @@ fn compare_snapshots(
     } else {
         OracleComparison {
             passed: false,
-            report: format!(
-                "Vim oracle case `{}` diverged:\n{}",
-                case.name,
-                mismatches.join("\n")
-            ),
+            report: format_mismatch_report(case, &mismatches, &nevi, &nvim),
         }
     }
+}
+
+fn format_mismatch_report(
+    case: &OracleCase,
+    mismatches: &[String],
+    nevi: &EditorSnapshot,
+    nvim: &EditorSnapshot,
+) -> String {
+    format!(
+        "Vim oracle case `{}` diverged\n\
+         Case: {}\n\
+         Keys: {}\n\
+         Initial text:\n{}\n\
+         Mismatches:\n{}\n\n\
+         Nevi snapshot:\n{}\n\n\
+         Neovim snapshot:\n{}",
+        case.name,
+        case.name,
+        case.keys,
+        format_initial_text(case.initial_text),
+        mismatches.join("\n"),
+        format_snapshot(nevi),
+        format_snapshot(nvim)
+    )
+}
+
+fn format_initial_text(text: &str) -> String {
+    if text.is_empty() {
+        "  <empty>".to_string()
+    } else {
+        text.lines()
+            .enumerate()
+            .map(|(index, line)| format!("  {:>3}: {}", index + 1, line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+fn format_snapshot(snapshot: &EditorSnapshot) -> String {
+    let lines = snapshot
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| format!("  {:>3}: {}", index + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "  mode={} cursor=({}, {})\n{}",
+        snapshot.mode, snapshot.cursor_line, snapshot.cursor_col, lines
+    )
 }
 
 fn compare_with_neovim(case: &OracleCase) -> Result<OracleComparison, String> {
@@ -398,6 +600,82 @@ mod tests {
     }
 
     #[test]
+    fn oracle_suite_groups_common_vim_parity_cases() {
+        let categories = oracle_categories();
+
+        assert!(
+            categories
+                .iter()
+                .any(|category| category.name == "motions" && category.cases.len() >= 10),
+            "motions category should cover common cursor movement"
+        );
+        assert!(
+            categories
+                .iter()
+                .any(|category| category.name == "editing" && category.cases.len() >= 8),
+            "editing category should cover common changes"
+        );
+        assert!(
+            categories
+                .iter()
+                .any(|category| category.name == "undo-redo" && category.cases.len() >= 2),
+            "undo-redo category should cover timeline basics"
+        );
+
+        let all_keys = categories
+            .iter()
+            .flat_map(|category| category.cases.iter().map(|case| case.keys))
+            .collect::<Vec<_>>();
+        for required in [
+            "w",
+            "wwb",
+            "gg",
+            "G",
+            "2dd",
+            "ciwdone<Esc>",
+            "A!<Esc>u",
+            "A!<Esc>u<C-r>",
+        ] {
+            assert!(
+                all_keys.contains(&required),
+                "oracle suite should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn comparison_report_includes_repro_context_and_snapshots() {
+        let case = OracleCase {
+            name: "line mismatch",
+            initial_text: "before\n",
+            keys: "A!<Esc>",
+        };
+        let nevi = EditorSnapshot {
+            lines: vec!["before!".to_string()],
+            cursor_line: 0,
+            cursor_col: 6,
+            mode: "normal".to_string(),
+        };
+        let nvim = EditorSnapshot {
+            lines: vec!["before".to_string()],
+            cursor_line: 0,
+            cursor_col: 5,
+            mode: "normal".to_string(),
+        };
+
+        let comparison = compare_snapshots(&case, nevi, nvim);
+
+        assert!(!comparison.passed);
+        assert!(comparison.report.contains("Case: line mismatch"));
+        assert!(comparison.report.contains("Keys: A!<Esc>"));
+        assert!(comparison.report.contains("Initial text:"));
+        assert!(comparison.report.contains("before"));
+        assert!(comparison.report.contains("Nevi snapshot:"));
+        assert!(comparison.report.contains("Neovim snapshot:"));
+        assert!(comparison.report.contains("Mismatches:"));
+    }
+
+    #[test]
     #[ignore = "requires NEVI_VIM_ORACLE=1 and nvim on PATH"]
     fn vim_oracle_smoke_matches_neovim_for_basic_normal_edit() {
         if std::env::var_os("NEVI_VIM_ORACLE").is_none() {
@@ -406,10 +684,12 @@ mod tests {
         }
 
         let mut reports = Vec::new();
-        for case in SMOKE_CASES {
-            let comparison = compare_with_neovim(case).expect("run oracle comparison");
-            if !comparison.passed {
-                reports.push(comparison.report);
+        for category in oracle_categories() {
+            for case in category.cases {
+                let comparison = compare_with_neovim(case).expect("run oracle comparison");
+                if !comparison.passed {
+                    reports.push(format!("[{}] {}", category.name, comparison.report));
+                }
             }
         }
 

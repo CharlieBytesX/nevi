@@ -11136,7 +11136,7 @@ mod tests {
     }
 
     #[test]
-    fn visual_delete_to_file_end_removes_all_text_with_trailing_newline() {
+    fn visual_delete_to_file_end_matches_vim_charwise_selection() {
         let mut editor = Editor::default();
         editor.replace_buffer_content("const a = 1;\nconst b = 2;\n");
 
@@ -11144,7 +11144,7 @@ mod tests {
         editor.apply_motion(Motion::FileEnd, 1);
         editor.visual_delete();
 
-        assert_eq!(editor.buffer().content(), "");
+        assert_eq!(editor.buffer().content(), "onst b = 2;\n");
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!((editor.cursor.line, editor.cursor.col), (0, 0));
     }

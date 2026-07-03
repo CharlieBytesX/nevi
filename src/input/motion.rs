@@ -281,7 +281,7 @@ pub fn apply_motion(
         Motion::FileStart => Some((0, 0)),
 
         Motion::FileEnd => {
-            let last_line = buffer.len_lines().saturating_sub(1);
+            let last_line = last_addressable_line(buffer);
             Some((last_line, 0))
         }
 
@@ -922,6 +922,18 @@ fn find_first_non_blank(buffer: &Buffer, line: usize) -> usize {
     0
 }
 
+fn last_addressable_line(buffer: &Buffer) -> usize {
+    let last_line = buffer.len_lines().saturating_sub(1);
+    if last_line > 0
+        && buffer.line_len(last_line) == 0
+        && buffer.line_len_including_newline(last_line) == 0
+    {
+        last_line - 1
+    } else {
+        last_line
+    }
+}
+
 /// Find character forward on the same line (f/t motions)
 /// If `till` is true, stop one position before the character (t motion)
 fn find_char_forward(
@@ -1063,4 +1075,25 @@ fn find_word_end_backward(
     // Check if we need to skip backward through same-class chars
     // to get to the previous word's end (in case we were at the start of a word)
     Some((l, c))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn buffer_with(content: &str) -> Buffer {
+        let mut buffer = Buffer::new();
+        buffer.insert_str(0, 0, content);
+        buffer.dirty = false;
+        buffer
+    }
+
+    #[test]
+    fn file_end_ignores_trailing_empty_rope_line() {
+        let buffer = buffer_with("alpha\nbeta\ngamma\n");
+
+        let position = apply_motion(&buffer, Motion::FileEnd, 0, 0, 1, 24);
+
+        assert_eq!(position, Some((2, 0)));
+    }
 }

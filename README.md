@@ -414,7 +414,9 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 ### Vim/Neovim Parity Checks
 
 Nevi includes a test-only Vim oracle harness for checking selected key sequences
-against headless Neovim. The normal test suite does not require Neovim:
+against headless Neovim. The suite covers grouped deterministic motion, editing,
+and undo/redo cases, and failures include the key sequence plus Nevi/Neovim
+snapshots. The normal test suite does not require Neovim:
 
 ```bash
 cargo test vim_oracle --quiet
