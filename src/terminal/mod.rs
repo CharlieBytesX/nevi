@@ -154,6 +154,197 @@ impl TerminalRenderStyle {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RenderLineColors {
+    editor_bg: Color,
+    editor_fg: Color,
+    cursor_line_bg: Color,
+    selection_bg: Color,
+    search_match_bg: Color,
+    search_match_fg: Color,
+    jump_label_bg: Color,
+    jump_label_fg: Color,
+    diagnostic_error_color: Color,
+    diagnostic_hint_color: Color,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RenderLineCellStyle {
+    fg: Color,
+    bg: Color,
+    bold: bool,
+    italic: bool,
+    underline_color: Option<Color>,
+    jump_label: Option<char>,
+}
+
+struct RenderLineContext<'a> {
+    line_idx: usize,
+    col_offset: usize,
+    virtual_prefix_chars: usize,
+    highlights: &'a [HighlightSpan],
+    visual_range: Option<(usize, usize, usize, usize)>,
+    mode: &'a Mode,
+    is_cursor_line: bool,
+    search_matches: &'a [(usize, usize, usize)],
+    jump_labels: &'a [(usize, char)],
+    diagnostics: &'a [&'a Diagnostic],
+    colors: RenderLineColors,
+    tab_width: usize,
+}
+
+impl RenderLineContext<'_> {
+    fn base_bg(&self) -> Color {
+        if self.is_cursor_line {
+            self.colors.cursor_line_bg
+        } else {
+            self.colors.editor_bg
+        }
+    }
+
+    fn source_col_for_position(&self, visual_idx: usize) -> Option<usize> {
+        source_col_for_wrap_segment_position(self.col_offset, self.virtual_prefix_chars, visual_idx)
+    }
+
+    fn style_for_source_col(&self, source_col: usize) -> RenderLineCellStyle {
+        self.style_for_source_col_with_syntax(source_col, self.syntax_style_at(source_col))
+    }
+
+    fn style_for_source_col_with_syntax(
+        &self,
+        source_col: usize,
+        syntax_style: Option<SyntaxStyle>,
+    ) -> RenderLineCellStyle {
+        let base_bg = self.base_bg();
+        let syntax_color = syntax_style.map(|style| style.fg);
+        let in_visual = self.is_visual_col(source_col);
+        let is_search = self.is_search_match(source_col);
+        let jump_label = self.jump_label_at(source_col);
+        let diag_at_col = diagnostic_at_col(self.diagnostics, self.line_idx, source_col);
+        let is_hint_diagnostic =
+            diag_at_col.map_or(false, |d| d.severity == DiagnosticSeverity::Hint);
+
+        let (bg, fg) = if jump_label.is_some() {
+            (self.colors.jump_label_bg, self.colors.jump_label_fg)
+        } else if in_visual {
+            (
+                self.colors.selection_bg,
+                syntax_color.unwrap_or(self.colors.editor_fg),
+            )
+        } else if is_search {
+            (self.colors.search_match_bg, self.colors.search_match_fg)
+        } else if is_hint_diagnostic {
+            (base_bg, self.colors.diagnostic_hint_color)
+        } else {
+            (base_bg, syntax_color.unwrap_or(self.colors.editor_fg))
+        };
+        let desired_style =
+            if jump_label.is_none() && (in_visual || (!is_search && !is_hint_diagnostic)) {
+                syntax_style
+            } else {
+                None
+            };
+        let underline_color = if jump_label.is_some() || in_visual || is_search {
+            None
+        } else {
+            diag_at_col.and_then(|diag| {
+                diagnostic_underline_color(diag, self.colors.diagnostic_error_color)
+            })
+        };
+
+        RenderLineCellStyle {
+            fg,
+            bg,
+            bold: jump_label.is_some() || desired_style.map_or(false, |style| style.bold),
+            italic: desired_style.map_or(false, |style| style.italic),
+            underline_color,
+            jump_label,
+        }
+    }
+
+    fn syntax_style_at(&self, source_col: usize) -> Option<SyntaxStyle> {
+        self.highlights
+            .iter()
+            .find(|h| source_col >= h.start_col && source_col < h.end_col)
+            .map(|h| h.style)
+    }
+
+    fn style_for_position(&self, visual_idx: usize) -> Option<RenderLineCellStyle> {
+        self.source_col_for_position(visual_idx)
+            .map(|source_col| self.style_for_source_col(source_col))
+    }
+
+    fn selection_end_for_line(&self, line_len: usize) -> Option<usize> {
+        let Some((start_line, start_col, end_line, end_col)) = self.visual_range else {
+            return None;
+        };
+        if self.line_idx < start_line || self.line_idx > end_line {
+            return None;
+        }
+
+        match self.mode {
+            Mode::VisualLine => Some(line_len),
+            Mode::VisualBlock => Some(end_col + 1),
+            Mode::Visual => {
+                let end = if self.line_idx == end_line {
+                    end_col + 1
+                } else {
+                    line_len
+                };
+                let start = if self.line_idx == start_line {
+                    start_col
+                } else {
+                    0
+                };
+                (end > start).then_some(end)
+            }
+            _ => None,
+        }
+    }
+
+    fn is_search_match(&self, source_col: usize) -> bool {
+        self.search_matches.iter().any(|(line, start, end)| {
+            *line == self.line_idx && source_col >= *start && source_col < *end
+        })
+    }
+
+    fn jump_label_at(&self, source_col: usize) -> Option<char> {
+        self.jump_labels
+            .iter()
+            .find_map(|(col, label)| (*col == source_col).then_some(*label))
+    }
+
+    fn is_visual_col(&self, source_col: usize) -> bool {
+        let Some((start_line, start_col, end_line, end_col)) = self.visual_range else {
+            return false;
+        };
+
+        match self.mode {
+            Mode::Visual => {
+                if self.line_idx > start_line && self.line_idx < end_line {
+                    true
+                } else if self.line_idx == start_line && self.line_idx == end_line {
+                    source_col >= start_col && source_col <= end_col
+                } else if self.line_idx == start_line {
+                    source_col >= start_col
+                } else if self.line_idx == end_line {
+                    source_col <= end_col
+                } else {
+                    false
+                }
+            }
+            Mode::VisualLine => self.line_idx >= start_line && self.line_idx <= end_line,
+            Mode::VisualBlock => {
+                self.line_idx >= start_line
+                    && self.line_idx <= end_line
+                    && source_col >= start_col
+                    && source_col <= end_col
+            }
+            _ => false,
+        }
+    }
+}
+
 fn terminal_cursor_style(
     cursor_info: crate::floating_terminal::TerminalCursorInfo,
 ) -> cursor::SetCursorStyle {
@@ -1237,31 +1428,35 @@ impl Terminal {
                 } else {
                     Vec::new()
                 };
-
-                let rendered_cols = self.render_line_segment_with_highlights(
-                    segment_text,
-                    file_line,
-                    segment.start_col,
-                    segment.virtual_prefix_chars,
-                    &highlights,
-                    visual_range,
-                    &editor.mode,
-                    highlight_cursor_line && is_cursor_line,
-                    &editor.search_matches,
-                    &jump_labels,
-                    &line_diagnostics,
+                let colors = RenderLineColors {
                     editor_bg,
                     editor_fg,
                     cursor_line_bg,
                     selection_bg,
-                    search_bg,
-                    search_fg,
-                    theme.ui.finder_match,
-                    Color::Black,
-                    theme.diagnostic.error,
-                    theme.ui.line_number, // Use grey color for unused code (hint diagnostics)
+                    search_match_bg: search_bg,
+                    search_match_fg: search_fg,
+                    jump_label_bg: theme.ui.finder_match,
+                    jump_label_fg: Color::Black,
+                    diagnostic_error_color: theme.diagnostic.error,
+                    diagnostic_hint_color: theme.ui.line_number,
+                };
+                let context = RenderLineContext {
+                    line_idx: file_line,
+                    col_offset: segment.start_col,
+                    virtual_prefix_chars: segment.virtual_prefix_chars,
+                    highlights: &highlights,
+                    visual_range,
+                    mode: &editor.mode,
+                    is_cursor_line: highlight_cursor_line && is_cursor_line,
+                    search_matches: &editor.search_matches,
+                    jump_labels: &jump_labels,
+                    diagnostics: &line_diagnostics,
+                    colors,
                     tab_width,
-                )?;
+                };
+
+                let rendered_cols =
+                    self.render_line_segment_with_highlights(segment_text, &context)?;
 
                 // Fill remaining space (sign column = 2)
                 let mut chars_printed =
@@ -1581,30 +1776,34 @@ impl Terminal {
                     } else {
                         Vec::new()
                     };
-
-                    let rendered_cols = self.render_line_with_highlights(
-                        &line_str,
-                        file_line,
-                        h_offset,
-                        &highlights,
-                        visual_range,
-                        &editor.mode,
-                        highlight_cursor_line && is_cursor_line,
-                        &editor.search_matches,
-                        &jump_labels,
-                        &line_diagnostics,
+                    let colors = RenderLineColors {
                         editor_bg,
                         editor_fg,
                         cursor_line_bg,
                         selection_bg,
-                        search_bg,
-                        search_fg,
-                        theme.ui.finder_match,
-                        Color::Black,
-                        theme.diagnostic.error,
-                        theme.ui.line_number, // Use grey color for unused code (hint diagnostics)
+                        search_match_bg: search_bg,
+                        search_match_fg: search_fg,
+                        jump_label_bg: theme.ui.finder_match,
+                        jump_label_fg: Color::Black,
+                        diagnostic_error_color: theme.diagnostic.error,
+                        diagnostic_hint_color: theme.ui.line_number,
+                    };
+                    let context = RenderLineContext {
+                        line_idx: file_line,
+                        col_offset: h_offset,
+                        virtual_prefix_chars: 0,
+                        highlights: &highlights,
+                        visual_range,
+                        mode: &editor.mode,
+                        is_cursor_line: highlight_cursor_line && is_cursor_line,
+                        search_matches: &editor.search_matches,
+                        jump_labels: &jump_labels,
+                        diagnostics: &line_diagnostics,
+                        colors,
                         tab_width,
-                    )?;
+                    };
+
+                    let rendered_cols = self.render_line_with_highlights(&line_str, &context)?;
 
                     // Track characters printed for fill calculation (sign column = 2)
                     let mut chars_printed =
@@ -1796,47 +1995,13 @@ impl Terminal {
 
     /// Render a line segment with syntax highlighting (for wrapped lines)
     /// col_offset is the starting column in the original line
-    #[allow(clippy::too_many_arguments)]
     fn render_line_segment_with_highlights(
         &mut self,
         text: &str,
-        line_num: usize,
-        col_offset: usize,
-        virtual_prefix_chars: usize,
-        highlights: &[HighlightSpan],
-        visual_range: Option<(usize, usize, usize, usize)>,
-        mode: &Mode,
-        is_cursor_line: bool,
-        search_matches: &[(usize, usize, usize)],
-        jump_labels: &[(usize, char)],
-        diagnostics: &[&Diagnostic],
-        editor_bg: Color,
-        editor_fg: Color,
-        cursor_line_bg: Color,
-        selection_bg: Color,
-        search_match_bg: Color,
-        search_match_fg: Color,
-        jump_label_bg: Color,
-        jump_label_fg: Color,
-        diagnostic_error_color: Color,
-        diagnostic_hint_color: Color,
-        tab_width: usize,
+        context: &RenderLineContext<'_>,
     ) -> anyhow::Result<usize> {
         let chars: Vec<char> = text.chars().collect();
-
-        // Determine the base background for this line
-        let base_bg = if is_cursor_line {
-            cursor_line_bg
-        } else {
-            editor_bg
-        };
-
-        // Check if a column is within a search match for this line
-        let in_search_match = |col: usize| -> bool {
-            search_matches
-                .iter()
-                .any(|(l, start, end)| *l == line_num && col >= *start && col < *end)
-        };
+        let base_bg = context.base_bg();
 
         let mut current_fg: Option<Color> = None;
         let mut current_bg: Option<Color> = None;
@@ -1848,55 +2013,26 @@ impl Terminal {
         for (i, ch) in chars.iter().enumerate() {
             // Calculate the actual column in the original line. Wrapped continuation
             // indentation is virtual text, so it has no source column.
-            let source_col =
-                source_col_for_wrap_segment_position(col_offset, virtual_prefix_chars, i);
+            let cell_style = context
+                .style_for_position(i)
+                .unwrap_or(RenderLineCellStyle {
+                    fg: context.colors.editor_fg,
+                    bg: base_bg,
+                    bold: false,
+                    italic: false,
+                    underline_color: None,
+                    jump_label: None,
+                });
 
-            // Check for visual selection
-            let in_visual =
-                if let (Some(actual_col), Some((start_line, start_col, end_line, end_col))) =
-                    (source_col, visual_range)
-                {
-                    match mode {
-                        Mode::Visual => {
-                            if line_num > start_line && line_num < end_line {
-                                true
-                            } else if line_num == start_line && line_num == end_line {
-                                actual_col >= start_col && actual_col <= end_col
-                            } else if line_num == start_line {
-                                actual_col >= start_col
-                            } else if line_num == end_line {
-                                actual_col <= end_col
-                            } else {
-                                false
-                            }
-                        }
-                        Mode::VisualLine => line_num >= start_line && line_num <= end_line,
-                        Mode::VisualBlock => {
-                            line_num >= start_line
-                                && line_num <= end_line
-                                && actual_col >= start_col
-                                && actual_col <= end_col
-                        }
-                        _ => false,
-                    }
-                } else {
-                    false
-                };
-
-            // Check if in search match
-            let is_search = source_col.map_or(false, in_search_match);
-
-            let jump_label = source_col.and_then(|actual_col| {
-                jump_labels
-                    .iter()
-                    .find_map(|(col, label)| (*col == actual_col).then_some(*label))
-            });
-
-            if let Some(label) = jump_label {
-                apply_labeled_jump_style(&mut self.stdout, jump_label_bg, jump_label_fg)?;
-                rendered_cols += print_editor_char(label, tab_width);
-                restore_after_labeled_jump(&mut self.stdout, base_bg, editor_fg)?;
-                current_fg = Some(editor_fg);
+            if let Some(label) = cell_style.jump_label {
+                apply_labeled_jump_style(
+                    &mut self.stdout,
+                    context.colors.jump_label_bg,
+                    context.colors.jump_label_fg,
+                )?;
+                rendered_cols += print_editor_char(label, context.tab_width);
+                restore_after_labeled_jump(&mut self.stdout, base_bg, context.colors.editor_fg)?;
+                current_fg = Some(context.colors.editor_fg);
                 current_bg = Some(base_bg);
                 current_bold = false;
                 current_italic = false;
@@ -1904,88 +2040,47 @@ impl Terminal {
                 continue;
             }
 
-            let diag_at_col = source_col
-                .and_then(|actual_col| diagnostic_at_col(diagnostics, line_num, actual_col));
-
-            // Find syntax highlight for this position
-            let syntax_style = source_col.and_then(|actual_col| {
-                highlights
-                    .iter()
-                    .find(|h| actual_col >= h.start_col && actual_col < h.end_col)
-                    .map(|h| h.style)
-            });
-            let syntax_color = syntax_style.map(|style| style.fg);
-
-            // Check if within a hint diagnostic (unused variable/import) - grey out the text
-            let is_hint_diagnostic =
-                diag_at_col.map_or(false, |d| d.severity == DiagnosticSeverity::Hint);
-
-            // Priority: visual selection > search match > hint (grey out) > base
-            let (desired_bg, desired_fg) = if jump_label.is_some() {
-                (jump_label_bg, jump_label_fg)
-            } else if in_visual {
-                (selection_bg, syntax_color.unwrap_or(editor_fg))
-            } else if is_search {
-                (search_match_bg, search_match_fg)
-            } else if is_hint_diagnostic {
-                // Grey out unused code (like Neovim does)
-                (base_bg, diagnostic_hint_color)
-            } else {
-                (base_bg, syntax_color.unwrap_or(editor_fg))
-            };
-            let desired_style =
-                if jump_label.is_none() && (in_visual || (!is_search && !is_hint_diagnostic)) {
-                    syntax_style
-                } else {
-                    None
-                };
-            let desired_bold =
-                jump_label.is_some() || desired_style.map_or(false, |style| style.bold);
-            let desired_italic = desired_style.map_or(false, |style| style.italic);
-            let desired_underline_color = if jump_label.is_some() || in_visual || is_search {
-                None
-            } else {
-                diag_at_col
-                    .and_then(|diag| diagnostic_underline_color(diag, diagnostic_error_color))
-            };
-
             // Only change colors when necessary
-            if Some(desired_bg) != current_bg {
-                execute!(self.stdout, SetBackgroundColor(desired_bg))?;
-                current_bg = Some(desired_bg);
+            if Some(cell_style.bg) != current_bg {
+                execute!(self.stdout, SetBackgroundColor(cell_style.bg))?;
+                current_bg = Some(cell_style.bg);
             }
-            if Some(desired_fg) != current_fg {
-                execute!(self.stdout, SetForegroundColor(desired_fg))?;
-                current_fg = Some(desired_fg);
+            if Some(cell_style.fg) != current_fg {
+                execute!(self.stdout, SetForegroundColor(cell_style.fg))?;
+                current_fg = Some(cell_style.fg);
             }
-            if desired_bold != current_bold {
+            if cell_style.bold != current_bold {
                 execute!(
                     self.stdout,
-                    SetAttribute(if desired_bold {
+                    SetAttribute(if cell_style.bold {
                         Attribute::Bold
                     } else {
                         Attribute::NoBold
                     })
                 )?;
-                current_bold = desired_bold;
+                current_bold = cell_style.bold;
             }
-            if desired_italic != current_italic {
+            if cell_style.italic != current_italic {
                 execute!(
                     self.stdout,
-                    SetAttribute(if desired_italic {
+                    SetAttribute(if cell_style.italic {
                         Attribute::Italic
                     } else {
                         Attribute::NoItalic
                     })
                 )?;
-                current_italic = desired_italic;
+                current_italic = cell_style.italic;
             }
-            if desired_underline_color != current_underline_color {
-                apply_diagnostic_underline(&mut self.stdout, desired_underline_color, desired_fg)?;
-                current_underline_color = desired_underline_color;
+            if cell_style.underline_color != current_underline_color {
+                apply_diagnostic_underline(
+                    &mut self.stdout,
+                    cell_style.underline_color,
+                    cell_style.fg,
+                )?;
+                current_underline_color = cell_style.underline_color;
             }
 
-            rendered_cols += print_editor_char(jump_label.unwrap_or(*ch), tab_width);
+            rendered_cols += print_editor_char(*ch, context.tab_width);
         }
 
         // Restore to base background/foreground and clear text attributes.
@@ -1993,7 +2088,7 @@ impl Terminal {
             self.stdout,
             SetAttribute(Attribute::Reset),
             SetBackgroundColor(base_bg),
-            SetForegroundColor(editor_fg)
+            SetForegroundColor(context.colors.editor_fg)
         )?;
 
         Ok(rendered_cols)
@@ -5842,82 +5937,12 @@ impl Terminal {
     fn render_line_with_highlights(
         &mut self,
         line: &str,
-        line_idx: usize,
-        col_offset: usize,
-        highlights: &[HighlightSpan],
-        visual_range: Option<(usize, usize, usize, usize)>,
-        mode: &Mode,
-        is_cursor_line: bool,
-        search_matches: &[(usize, usize, usize)],
-        jump_labels: &[(usize, char)],
-        diagnostics: &[&Diagnostic],
-        editor_bg: Color,
-        editor_fg: Color,
-        cursor_line_bg: Color,
-        selection_bg: Color,
-        search_match_bg: Color,
-        search_match_fg: Color,
-        jump_label_bg: Color,
-        jump_label_fg: Color,
-        diagnostic_error_color: Color,
-        diagnostic_hint_color: Color,
-        tab_width: usize,
+        context: &RenderLineContext<'_>,
     ) -> anyhow::Result<usize> {
         let chars: Vec<char> = line.chars().collect();
         let line_len = chars.len();
-
-        // Determine selection range for this line based on visual mode
-        let (in_selection, sel_start, sel_end) =
-            if let Some((range_start_line, range_start_col, range_end_line, range_end_col)) =
-                visual_range
-            {
-                if line_idx < range_start_line || line_idx > range_end_line {
-                    (false, 0, 0)
-                } else {
-                    match mode {
-                        Mode::VisualLine => {
-                            // Line-wise: entire line is selected
-                            (true, 0, line_len)
-                        }
-                        Mode::VisualBlock => {
-                            // Block-wise: select columns range_start_col to range_end_col (inclusive)
-                            // range returns (top, left, bottom, right)
-                            (true, range_start_col, range_end_col + 1)
-                        }
-                        Mode::Visual => {
-                            // Character-wise: depends on line position
-                            let start = if line_idx == range_start_line {
-                                range_start_col
-                            } else {
-                                0
-                            };
-                            let end = if line_idx == range_end_line {
-                                range_end_col + 1
-                            } else {
-                                line_len
-                            };
-                            (true, start, end)
-                        }
-                        _ => (false, 0, 0),
-                    }
-                }
-            } else {
-                (false, 0, 0)
-            };
-
-        // Determine the base background for this line (cursor line or editor background)
-        let base_bg = if is_cursor_line {
-            cursor_line_bg
-        } else {
-            editor_bg
-        };
-
-        // Check if a column is within a search match for this line
-        let in_search_match = |actual_col: usize| -> bool {
-            search_matches
-                .iter()
-                .any(|(l, start, end)| *l == line_idx && actual_col >= *start && actual_col < *end)
-        };
+        let base_bg = context.base_bg();
+        let selection_end = context.selection_end_for_line(line_len);
 
         // Render character by character
         let mut highlight_idx = 0;
@@ -5929,28 +5954,22 @@ impl Terminal {
         let mut rendered_cols = 0;
         for (i, ch) in chars.iter().enumerate() {
             // Map display column to actual buffer column
-            let actual_col = col_offset + i;
+            let actual_col = context.col_offset + i;
 
             // Find syntax color for this column
             let syntax_style =
-                Self::get_syntax_style_at(highlights, actual_col, &mut highlight_idx);
-            let syntax_color = syntax_style.map(|style| style.fg);
+                Self::get_syntax_style_at(context.highlights, actual_col, &mut highlight_idx);
+            let cell_style = context.style_for_source_col_with_syntax(actual_col, syntax_style);
 
-            // Check if in visual selection
-            let is_selected = in_selection && actual_col >= sel_start && actual_col < sel_end;
-
-            // Check if in search match
-            let is_search_match = in_search_match(actual_col);
-
-            let jump_label = jump_labels
-                .iter()
-                .find_map(|(col, label)| (*col == actual_col).then_some(*label));
-
-            if let Some(label) = jump_label {
-                apply_labeled_jump_style(&mut self.stdout, jump_label_bg, jump_label_fg)?;
-                rendered_cols += print_editor_char(label, tab_width);
-                restore_after_labeled_jump(&mut self.stdout, base_bg, editor_fg)?;
-                current_fg = Some(editor_fg);
+            if let Some(label) = cell_style.jump_label {
+                apply_labeled_jump_style(
+                    &mut self.stdout,
+                    context.colors.jump_label_bg,
+                    context.colors.jump_label_fg,
+                )?;
+                rendered_cols += print_editor_char(label, context.tab_width);
+                restore_after_labeled_jump(&mut self.stdout, base_bg, context.colors.editor_fg)?;
+                current_fg = Some(context.colors.editor_fg);
                 current_bg = Some(base_bg);
                 current_bold = false;
                 current_italic = false;
@@ -5958,85 +5977,52 @@ impl Terminal {
                 continue;
             }
 
-            let diag_at_col = diagnostic_at_col(diagnostics, line_idx, actual_col);
-
-            // Check if within a hint diagnostic (unused variable/import) - grey out the text
-            let is_hint_diagnostic =
-                diag_at_col.map_or(false, |d| d.severity == DiagnosticSeverity::Hint);
-
-            // Priority: visual selection > search match > hint (grey out) > base
-            let (desired_bg, desired_fg) = if jump_label.is_some() {
-                (jump_label_bg, jump_label_fg)
-            } else if is_selected {
-                (selection_bg, syntax_color.unwrap_or(editor_fg))
-            } else if is_search_match {
-                (search_match_bg, search_match_fg)
-            } else if is_hint_diagnostic {
-                // Grey out unused code (like Neovim does)
-                (base_bg, diagnostic_hint_color)
-            } else {
-                (base_bg, syntax_color.unwrap_or(editor_fg))
-            };
-            let desired_style = if jump_label.is_none()
-                && (is_selected || (!is_search_match && !is_hint_diagnostic))
-            {
-                syntax_style
-            } else {
-                None
-            };
-            let desired_bold =
-                jump_label.is_some() || desired_style.map_or(false, |style| style.bold);
-            let desired_italic = desired_style.map_or(false, |style| style.italic);
-            let desired_underline_color = if jump_label.is_some() || is_selected || is_search_match
-            {
-                None
-            } else {
-                diag_at_col
-                    .and_then(|diag| diagnostic_underline_color(diag, diagnostic_error_color))
-            };
-
             // Only change colors when necessary
-            if Some(desired_bg) != current_bg {
-                execute!(self.stdout, SetBackgroundColor(desired_bg))?;
-                current_bg = Some(desired_bg);
+            if Some(cell_style.bg) != current_bg {
+                execute!(self.stdout, SetBackgroundColor(cell_style.bg))?;
+                current_bg = Some(cell_style.bg);
             }
-            if Some(desired_fg) != current_fg {
-                execute!(self.stdout, SetForegroundColor(desired_fg))?;
-                current_fg = Some(desired_fg);
+            if Some(cell_style.fg) != current_fg {
+                execute!(self.stdout, SetForegroundColor(cell_style.fg))?;
+                current_fg = Some(cell_style.fg);
             }
-            if desired_bold != current_bold {
+            if cell_style.bold != current_bold {
                 execute!(
                     self.stdout,
-                    SetAttribute(if desired_bold {
+                    SetAttribute(if cell_style.bold {
                         Attribute::Bold
                     } else {
                         Attribute::NoBold
                     })
                 )?;
-                current_bold = desired_bold;
+                current_bold = cell_style.bold;
             }
-            if desired_italic != current_italic {
+            if cell_style.italic != current_italic {
                 execute!(
                     self.stdout,
-                    SetAttribute(if desired_italic {
+                    SetAttribute(if cell_style.italic {
                         Attribute::Italic
                     } else {
                         Attribute::NoItalic
                     })
                 )?;
-                current_italic = desired_italic;
+                current_italic = cell_style.italic;
             }
-            if desired_underline_color != current_underline_color {
-                apply_diagnostic_underline(&mut self.stdout, desired_underline_color, desired_fg)?;
-                current_underline_color = desired_underline_color;
+            if cell_style.underline_color != current_underline_color {
+                apply_diagnostic_underline(
+                    &mut self.stdout,
+                    cell_style.underline_color,
+                    cell_style.fg,
+                )?;
+                current_underline_color = cell_style.underline_color;
             }
 
-            rendered_cols += print_editor_char(jump_label.unwrap_or(*ch), tab_width);
+            rendered_cols += print_editor_char(*ch, context.tab_width);
         }
 
         // Handle selection extending past line end
-        if in_selection && sel_end > line_len {
-            execute!(self.stdout, SetBackgroundColor(selection_bg))?;
+        if selection_end.is_some_and(|end| end > line_len) {
+            execute!(self.stdout, SetBackgroundColor(context.colors.selection_bg))?;
             print!(" ");
             rendered_cols += 1;
         }
@@ -6046,7 +6032,7 @@ impl Terminal {
             self.stdout,
             SetAttribute(Attribute::Reset),
             SetBackgroundColor(base_bg),
-            SetForegroundColor(editor_fg)
+            SetForegroundColor(context.colors.editor_fg)
         )?;
 
         Ok(rendered_cols)
@@ -10146,7 +10132,7 @@ mod tests {
         apply_diagnostic_underline, apply_labeled_jump_style, diagnostic_at_col,
         diagnostic_underline_color, execute_command, execute_leader_action,
         finder_preview_match_ranges, handle_insert_mode, handle_key, replace_completion_text,
-        restore_after_labeled_jump, Terminal,
+        restore_after_labeled_jump, RenderLineColors, RenderLineContext, Terminal,
     };
     use crate::commands::{Command, CommandPopupMode};
     use crate::config::{KeymapEntry, Settings};
@@ -10155,6 +10141,7 @@ mod tests {
     use crate::finder::FinderMode;
     use crate::input::Motion;
     use crate::lsp::types::{CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity};
+    use crate::syntax::{HighlightSpan, SyntaxStyle};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crossterm::style::Color;
     use std::path::Path;
@@ -11005,6 +10992,56 @@ mod tests {
             diagnostic_underline_color(&diag, Color::Rgb { r: 255, g: 0, b: 0 }),
             None
         );
+    }
+
+    #[test]
+    fn render_line_context_prefers_search_over_syntax_and_clears_underline() {
+        let diagnostics = Vec::<&Diagnostic>::new();
+        let highlights = vec![HighlightSpan {
+            start_col: 2,
+            end_col: 5,
+            fg: Color::Blue,
+            style: SyntaxStyle {
+                fg: Color::Blue,
+                bold: true,
+                italic: false,
+            },
+        }];
+        let search_matches = vec![(3, 2, 5)];
+        let jump_labels = Vec::<(usize, char)>::new();
+        let colors = RenderLineColors {
+            editor_bg: Color::Black,
+            editor_fg: Color::White,
+            cursor_line_bg: Color::DarkGrey,
+            selection_bg: Color::DarkBlue,
+            search_match_bg: Color::Yellow,
+            search_match_fg: Color::Black,
+            jump_label_bg: Color::Green,
+            jump_label_fg: Color::Black,
+            diagnostic_error_color: Color::Red,
+            diagnostic_hint_color: Color::DarkGrey,
+        };
+        let context = RenderLineContext {
+            line_idx: 3,
+            col_offset: 0,
+            virtual_prefix_chars: 0,
+            highlights: &highlights,
+            visual_range: None,
+            mode: &Mode::Normal,
+            is_cursor_line: false,
+            search_matches: &search_matches,
+            jump_labels: &jump_labels,
+            diagnostics: &diagnostics,
+            colors,
+            tab_width: 4,
+        };
+
+        let cell = context.style_for_source_col(2);
+
+        assert_eq!(cell.bg, Color::Yellow);
+        assert_eq!(cell.fg, Color::Black);
+        assert!(!cell.bold, "search match should not inherit syntax bold");
+        assert_eq!(cell.underline_color, None);
     }
 
     #[test]
