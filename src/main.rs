@@ -143,8 +143,22 @@ enum PickModeAction {
     Select(PathBuf),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalOutputTarget {
+    Stdout,
+    Tty,
+}
+
 fn version_output() -> String {
     format!("nevi {}", env!("CARGO_PKG_VERSION"))
+}
+
+fn terminal_output_target_for_pick_mode(pick_mode: bool) -> TerminalOutputTarget {
+    if pick_mode {
+        TerminalOutputTarget::Tty
+    } else {
+        TerminalOutputTarget::Stdout
+    }
 }
 
 fn startup_action_from_args<I, S>(args: I) -> CliStartupAction
@@ -190,7 +204,9 @@ fn pick_mode_action_for_key(editor: &Editor, key: KeyEvent) -> PickModeAction {
         (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::CONTROL, KeyCode::Char('[')) => PickModeAction::Cancel,
-        (KeyModifiers::NONE, KeyCode::Char('q')) if editor.finder.query.is_empty() => {
+        (KeyModifiers::NONE, KeyCode::Char('q'))
+            if editor.finder.is_normal_mode() && editor.finder.query.is_empty() =>
+        {
             PickModeAction::Cancel
         }
         _ => PickModeAction::Continue,
@@ -364,7 +380,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Initialize terminal
-    let mut terminal = Terminal::new()?;
+    let mut terminal = match terminal_output_target_for_pick_mode(pick_mode) {
+        TerminalOutputTarget::Stdout => Terminal::new()?,
+        TerminalOutputTarget::Tty => Terminal::new_tty()?,
+    };
 
     // Get initial size
     let (width, height) = Terminal::size()?;
@@ -2397,7 +2416,8 @@ mod tests {
         apply_edits_to_file, diagnostic_to_lsp_offsets, editor_lsp_cursor_col, editor_lsp_line_len,
         lsp_completion_response_matches_current_cursor, lsp_response_matches_current_buffer,
         pick_mode_action_for_key, profile_enabled_from_value, startup_action_from_args,
-        CliStartupAction, PickModeAction,
+        terminal_output_target_for_pick_mode, CliStartupAction, PickModeAction,
+        TerminalOutputTarget,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use nevi::lsp::types::{Diagnostic, DiagnosticSeverity, TextEdit};
@@ -2549,6 +2569,7 @@ mod tests {
         let mut editor = Editor::default();
         editor.mode = Mode::Finder;
         editor.finder.mode = nevi::finder::FinderMode::Files;
+        editor.finder.input_mode = nevi::finder::FinderInputMode::Normal;
 
         assert_eq!(
             pick_mode_action_for_key(&editor, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
@@ -2569,6 +2590,43 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
             ),
             PickModeAction::Continue
+        );
+    }
+
+    #[test]
+    fn pick_mode_q_only_cancels_in_finder_normal_mode() {
+        let mut editor = Editor::default();
+        editor.mode = Mode::Finder;
+        editor.finder.mode = nevi::finder::FinderMode::Files;
+        editor.finder.input_mode = nevi::finder::FinderInputMode::Insert;
+
+        assert_eq!(
+            pick_mode_action_for_key(
+                &editor,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+            ),
+            PickModeAction::Continue
+        );
+
+        editor.finder.input_mode = nevi::finder::FinderInputMode::Normal;
+        assert_eq!(
+            pick_mode_action_for_key(
+                &editor,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+            ),
+            PickModeAction::Cancel
+        );
+    }
+
+    #[test]
+    fn pick_mode_uses_tty_for_terminal_output() {
+        assert_eq!(
+            terminal_output_target_for_pick_mode(true),
+            TerminalOutputTarget::Tty
+        );
+        assert_eq!(
+            terminal_output_target_for_pick_mode(false),
+            TerminalOutputTarget::Stdout
         );
     }
 

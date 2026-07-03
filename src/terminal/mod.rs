@@ -9,7 +9,7 @@ use crossterm::{
     style::{Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
-use std::io::{self, Stdout, Write};
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use unicode_width::UnicodeWidthChar;
@@ -552,15 +552,25 @@ fn source_col_for_wrap_segment_char(segment: &WrapSegment, visual_idx: usize) ->
 
 /// Terminal handler responsible for rendering and input
 pub struct Terminal {
-    stdout: Stdout,
+    stdout: Box<dyn Write>,
     mouse_capture_enabled: bool,
     leader_popup_rect: Option<(u16, u16)>,
 }
 
 impl Terminal {
     pub fn new() -> anyhow::Result<Self> {
-        let mut stdout = io::stdout();
+        Self::new_with_writer(Box::new(io::stdout()))
+    }
 
+    pub fn new_tty() -> anyhow::Result<Self> {
+        let tty = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")?;
+        Self::new_with_writer(Box::new(tty))
+    }
+
+    fn new_with_writer(mut stdout: Box<dyn Write>) -> anyhow::Result<Self> {
         // Enter raw mode and alternate screen
         terminal::enable_raw_mode()?;
         execute!(
