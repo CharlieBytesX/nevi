@@ -27,6 +27,8 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
+const MAX_VISIBLE_SEARCH_MATCHES: usize = 2048;
+
 /// The current mode of the editor
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -2028,7 +2030,7 @@ impl Editor {
         &self,
         query: &str,
     ) -> Vec<crate::labeled_jump::LabeledJumpTarget> {
-        let (viewport_offset, visible_rows) = self.labeled_jump_visible_region();
+        let (viewport_offset, visible_rows) = self.visible_text_region();
         let end_line = viewport_offset
             .saturating_add(visible_rows)
             .min(self.buffer().len_lines());
@@ -2042,7 +2044,7 @@ impl Editor {
         crate::labeled_jump::collect_visible_targets(&lines, viewport_offset, visible_rows, query)
     }
 
-    fn labeled_jump_visible_region(&self) -> (usize, usize) {
+    fn visible_text_region(&self) -> (usize, usize) {
         let Some(pane) = self.panes.get(self.active_pane) else {
             return (self.viewport_offset, self.text_rows());
         };
@@ -5851,82 +5853,24 @@ impl Editor {
         self.search_matches.clear();
     }
 
-    /// Update incremental search matches based on current search input
-    /// This finds all matches in the buffer and highlights them while typing
+    /// Update incremental search matches based on current search input.
+    /// Search navigation still scans the whole buffer, but highlight storage
+    /// is limited to visible rows so rendering stays bounded.
     pub fn update_incremental_search(&mut self) {
-        self.search_matches.clear();
-
-        let pattern = &self.search.input;
+        let pattern = self.search.input.clone();
         if pattern.is_empty() {
+            self.search_matches.clear();
             return;
         }
 
-        let total_lines = self.buffers[self.current_buffer_idx].len_lines();
-        if total_lines == 0 {
-            return;
+        if let Some((line, col, _)) = self.find_search_target(&pattern, self.search.direction, true)
+        {
+            self.cursor.line = line;
+            self.cursor.col = col;
+            self.scroll_to_cursor();
         }
 
-        // Find all matches in the buffer
-        for line_idx in 0..total_lines {
-            if let Some(line) = self.buffers[self.current_buffer_idx].line(line_idx) {
-                let line_str: String = line.chars().collect();
-                let pattern_len = pattern.chars().count();
-
-                // Find all occurrences in this line
-                let mut search_from = 0;
-                while search_from < line_str.len() {
-                    if let Some(byte_pos) = line_str[search_from..].find(pattern) {
-                        let match_byte_start = search_from + byte_pos;
-                        let match_byte_end = match_byte_start + pattern.len();
-
-                        // Convert byte positions to char positions
-                        let start_col = Self::byte_to_char_idx(&line_str, match_byte_start);
-                        let end_col = start_col + pattern_len;
-
-                        self.search_matches.push((line_idx, start_col, end_col));
-
-                        // Move past this match to find more
-                        search_from = match_byte_end;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Jump to first match in search direction (preview)
-        if !self.search_matches.is_empty() {
-            let cursor_line = self.cursor.line;
-            let cursor_col = self.cursor.col;
-
-            let target = match self.search.direction {
-                SearchDirection::Forward => {
-                    // Find first match at or after cursor
-                    self.search_matches
-                        .iter()
-                        .find(|(line, col, _)| {
-                            *line > cursor_line || (*line == cursor_line && *col > cursor_col)
-                        })
-                        .or_else(|| self.search_matches.first())
-                }
-                SearchDirection::Backward => {
-                    // Find last match before cursor
-                    self.search_matches
-                        .iter()
-                        .rev()
-                        .find(|(line, col, _)| {
-                            *line < cursor_line || (*line == cursor_line && *col < cursor_col)
-                        })
-                        .or_else(|| self.search_matches.last())
-                }
-            };
-
-            if let Some(&(line, col, _)) = target {
-                self.cursor.line = line;
-                self.cursor.col = col;
-                self.scroll_to_cursor();
-            }
-        }
+        self.refresh_visible_search_matches(&pattern);
     }
 
     /// Execute the current search
@@ -5934,7 +5878,10 @@ impl Editor {
         let direction = self.search.direction;
         if let Some(pattern) = self.search.execute() {
             self.mode = Mode::Normal;
-            if !self.do_search(&pattern, direction, true) {
+            if self.do_search(&pattern, direction, true) {
+                self.refresh_visible_search_matches(&pattern);
+            } else {
+                self.search_matches.clear();
                 self.set_status(format!("Pattern not found: {}", pattern));
             }
         } else {
@@ -5949,9 +5896,10 @@ impl Editor {
             // Record jump before searching (search is a jump motion)
             self.record_jump();
             let direction = self.search.last_direction;
-            // Update search highlights
-            self.update_search_matches_from_pattern(&pattern);
-            if !self.do_search(&pattern, direction, true) {
+            if self.do_search(&pattern, direction, true) {
+                self.refresh_visible_search_matches(&pattern);
+            } else {
+                self.search_matches.clear();
                 self.set_status(format!("Pattern not found: {}", pattern));
             }
         } else {
@@ -5969,9 +5917,10 @@ impl Editor {
                 SearchDirection::Forward => SearchDirection::Backward,
                 SearchDirection::Backward => SearchDirection::Forward,
             };
-            // Update search highlights
-            self.update_search_matches_from_pattern(&pattern);
-            if !self.do_search(&pattern, direction, true) {
+            if self.do_search(&pattern, direction, true) {
+                self.refresh_visible_search_matches(&pattern);
+            } else {
+                self.search_matches.clear();
                 self.set_status(format!("Pattern not found: {}", pattern));
             }
         } else {
@@ -6022,16 +5971,60 @@ impl Editor {
         }
     }
 
+    fn refresh_visible_search_matches(&mut self, pattern: &str) {
+        self.search_matches.clear();
+
+        if pattern.is_empty() {
+            return;
+        }
+
+        let total_lines = self.buffers[self.current_buffer_idx].len_lines();
+        if total_lines == 0 {
+            return;
+        }
+
+        let (viewport_offset, visible_rows) = self.visible_text_region();
+        let end_line = viewport_offset
+            .saturating_add(visible_rows)
+            .min(total_lines);
+        let pattern_len = pattern.chars().count();
+
+        'lines: for line_idx in viewport_offset..end_line {
+            if let Some(line) = self.buffers[self.current_buffer_idx].line(line_idx) {
+                let line_str: String = line.chars().collect();
+                let mut search_from = 0;
+
+                while search_from < line_str.len() {
+                    if let Some(byte_pos) = line_str[search_from..].find(pattern) {
+                        let match_byte_start = search_from + byte_pos;
+                        let match_byte_end = match_byte_start + pattern.len();
+                        let start_col = Self::byte_to_char_idx(&line_str, match_byte_start);
+                        let end_col = start_col + pattern_len;
+
+                        self.search_matches.push((line_idx, start_col, end_col));
+                        if self.search_matches.len() >= MAX_VISIBLE_SEARCH_MATCHES {
+                            break 'lines;
+                        }
+
+                        search_from = match_byte_end;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     /// Search for word under cursor forward (*)
     pub fn search_word_forward(&mut self) {
         if let Some(word) = self.get_word_under_cursor() {
             // Set as search pattern
             self.search.last_pattern = Some(word.clone());
             self.search.last_direction = SearchDirection::Forward;
-            // Update search highlights
-            self.update_search_matches_from_pattern(&word);
-            // Perform search
-            if !self.do_search(&word, SearchDirection::Forward, true) {
+            if self.do_search(&word, SearchDirection::Forward, true) {
+                self.refresh_visible_search_matches(&word);
+            } else {
+                self.search_matches.clear();
                 self.set_status(format!("Pattern not found: {}", word));
             }
         } else {
@@ -6045,10 +6038,10 @@ impl Editor {
             // Set as search pattern
             self.search.last_pattern = Some(word.clone());
             self.search.last_direction = SearchDirection::Backward;
-            // Update search highlights
-            self.update_search_matches_from_pattern(&word);
-            // Perform search
-            if !self.do_search(&word, SearchDirection::Backward, true) {
+            if self.do_search(&word, SearchDirection::Backward, true) {
+                self.refresh_visible_search_matches(&word);
+            } else {
+                self.search_matches.clear();
                 self.set_status(format!("Pattern not found: {}", word));
             }
         } else {
@@ -6447,9 +6440,37 @@ impl Editor {
     /// Perform the actual search
     /// Returns true if found, false otherwise
     fn do_search(&mut self, pattern: &str, direction: SearchDirection, wrap: bool) -> bool {
+        let Some((line, col, wrapped)) = self.find_search_target(pattern, direction, wrap) else {
+            return false;
+        };
+
+        self.cursor.line = line;
+        self.cursor.col = col;
+        self.scroll_to_cursor();
+
+        if wrapped {
+            match direction {
+                SearchDirection::Forward => {
+                    self.set_status("search hit BOTTOM, continuing at TOP");
+                }
+                SearchDirection::Backward => {
+                    self.set_status("search hit TOP, continuing at BOTTOM");
+                }
+            }
+        }
+
+        true
+    }
+
+    fn find_search_target(
+        &self,
+        pattern: &str,
+        direction: SearchDirection,
+        wrap: bool,
+    ) -> Option<(usize, usize, bool)> {
         let total_lines = self.buffers[self.current_buffer_idx].len_lines();
         if total_lines == 0 || pattern.is_empty() {
-            return false;
+            return None;
         }
 
         match direction {
@@ -6463,9 +6484,11 @@ impl Editor {
                     if search_start_byte < line_str.len() {
                         if let Some(pos) = line_str[search_start_byte..].find(pattern) {
                             let byte_pos = search_start_byte + pos;
-                            self.cursor.col = Self::byte_to_char_idx(&line_str, byte_pos);
-                            self.scroll_to_cursor();
-                            return true;
+                            return Some((
+                                self.cursor.line,
+                                Self::byte_to_char_idx(&line_str, byte_pos),
+                                false,
+                            ));
                         }
                     }
                 }
@@ -6475,10 +6498,7 @@ impl Editor {
                     if let Some(line) = self.buffers[self.current_buffer_idx].line(line_idx) {
                         let line_str: String = line.chars().collect();
                         if let Some(pos) = line_str.find(pattern) {
-                            self.cursor.line = line_idx;
-                            self.cursor.col = Self::byte_to_char_idx(&line_str, pos);
-                            self.scroll_to_cursor();
-                            return true;
+                            return Some((line_idx, Self::byte_to_char_idx(&line_str, pos), false));
                         }
                     }
                 }
@@ -6497,11 +6517,11 @@ impl Editor {
                             if let Some(pos) =
                                 line_str[..end_byte.min(line_str.len())].find(pattern)
                             {
-                                self.cursor.line = line_idx;
-                                self.cursor.col = Self::byte_to_char_idx(&line_str, pos);
-                                self.scroll_to_cursor();
-                                self.set_status("search hit BOTTOM, continuing at TOP");
-                                return true;
+                                return Some((
+                                    line_idx,
+                                    Self::byte_to_char_idx(&line_str, pos),
+                                    true,
+                                ));
                             }
                         }
                     }
@@ -6515,9 +6535,11 @@ impl Editor {
                     if self.cursor.col > 0 {
                         let end_byte = Self::char_to_byte_idx(&line_str, self.cursor.col);
                         if let Some(pos) = line_str[..end_byte].rfind(pattern) {
-                            self.cursor.col = Self::byte_to_char_idx(&line_str, pos);
-                            self.scroll_to_cursor();
-                            return true;
+                            return Some((
+                                self.cursor.line,
+                                Self::byte_to_char_idx(&line_str, pos),
+                                false,
+                            ));
                         }
                     }
                 }
@@ -6527,10 +6549,7 @@ impl Editor {
                     if let Some(line) = self.buffers[self.current_buffer_idx].line(line_idx) {
                         let line_str: String = line.chars().collect();
                         if let Some(pos) = line_str.rfind(pattern) {
-                            self.cursor.line = line_idx;
-                            self.cursor.col = Self::byte_to_char_idx(&line_str, pos);
-                            self.scroll_to_cursor();
-                            return true;
+                            return Some((line_idx, Self::byte_to_char_idx(&line_str, pos), false));
                         }
                     }
                 }
@@ -6548,12 +6567,11 @@ impl Editor {
                             let start_byte = Self::char_to_byte_idx(&line_str, start_col);
                             if start_byte < line_str.len() {
                                 if let Some(pos) = line_str[start_byte..].rfind(pattern) {
-                                    self.cursor.line = line_idx;
-                                    self.cursor.col =
-                                        Self::byte_to_char_idx(&line_str, start_byte + pos);
-                                    self.scroll_to_cursor();
-                                    self.set_status("search hit TOP, continuing at BOTTOM");
-                                    return true;
+                                    return Some((
+                                        line_idx,
+                                        Self::byte_to_char_idx(&line_str, start_byte + pos),
+                                        true,
+                                    ));
                                 }
                             }
                         }
@@ -6562,7 +6580,7 @@ impl Editor {
             }
         }
 
-        false
+        None
     }
 
     /// Convert a character index to a byte index in a string
@@ -10297,7 +10315,7 @@ fn project_replace_display_path(root: &std::path::Path, path: &std::path::Path) 
 
 #[cfg(test)]
 mod tests {
-    use super::{Editor, JumpList, Mode, SplitLayout};
+    use super::{Editor, JumpList, Mode, SearchDirection, SplitLayout};
     use crate::input::Motion;
     use crate::lsp::types::{
         CodeActionItem, CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity, TextEdit,
@@ -10349,6 +10367,70 @@ mod tests {
         }
 
         panic!("external change was not detected for {}", path.display());
+    }
+
+    #[test]
+    fn incremental_search_highlights_only_visible_matches() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 8);
+        let content = (0..40)
+            .map(|idx| format!("old line {idx}\n"))
+            .collect::<String>();
+        editor.replace_buffer_content(&content);
+        editor.enter_search_forward();
+        editor.search.input = "old".to_string();
+        editor.search.cursor = 3;
+
+        editor.update_incremental_search();
+
+        let visible_rows = editor.text_rows();
+        assert!(
+            editor.search_matches.len() <= visible_rows,
+            "search highlights should be bounded to visible rows, got {} matches for {} visible rows",
+            editor.search_matches.len(),
+            visible_rows
+        );
+        assert!(
+            editor
+                .search_matches
+                .iter()
+                .all(|(line, _, _)| *line >= editor.viewport_offset
+                    && *line < editor.viewport_offset + visible_rows),
+            "search highlights should only include visible lines"
+        );
+    }
+
+    #[test]
+    fn search_next_jumps_outside_viewport_without_materializing_all_matches() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 8);
+        let mut lines = Vec::new();
+        lines.push("start\n".to_string());
+        for idx in 1..40 {
+            lines.push(format!("old hidden {idx}\n"));
+        }
+        editor.replace_buffer_content(&lines.concat());
+        editor.search.last_pattern = Some("old".to_string());
+        editor.search.last_direction = SearchDirection::Forward;
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        editor.search_next();
+
+        assert_eq!(editor.cursor.line, 1);
+        let visible_rows = editor.text_rows();
+        assert!(
+            editor.search_matches.len() <= visible_rows,
+            "search_next should not retain every file match for rendering"
+        );
+        assert!(
+            editor
+                .search_matches
+                .iter()
+                .all(|(line, _, _)| *line >= editor.viewport_offset
+                    && *line < editor.viewport_offset + visible_rows),
+            "search_next highlights should be limited to visible lines"
+        );
     }
 
     #[test]
