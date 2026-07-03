@@ -680,6 +680,7 @@ mod tests {
             ("file.less", "less"),
             ("file.pyi", "python"),
             ("file.pyw", "python"),
+            ("file.go", "go"),
         ];
 
         for (path, language) in cases {

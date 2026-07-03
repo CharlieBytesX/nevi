@@ -24,6 +24,7 @@ pub enum LanguageId {
     Markdown,
     Html,
     Python,
+    Go,
 }
 
 impl LanguageId {
@@ -39,6 +40,7 @@ impl LanguageId {
             "md" | "markdown" => Some(Self::Markdown),
             "html" | "htm" => Some(Self::Html),
             "py" | "pyi" | "pyw" => Some(Self::Python),
+            "go" => Some(Self::Go),
             _ => None,
         }
     }
@@ -62,6 +64,7 @@ impl LanguageId {
             Self::Markdown => "markdown",
             Self::Html => "html",
             Self::Python => "python",
+            Self::Go => "go",
         }
     }
 }
@@ -113,6 +116,7 @@ impl MultiLspManager {
             LanguageId::Markdown,
             LanguageId::Html,
             LanguageId::Python,
+            LanguageId::Go,
         ]
         .into_iter()
         .find(|lang| {
@@ -289,6 +293,7 @@ impl MultiLspManager {
         markdown_config: LspServerConfig,
         html_config: LspServerConfig,
         python_config: LspServerConfig,
+        go_config: LspServerConfig,
     ) -> Self {
         let mut configs = HashMap::new();
         configs.insert(LanguageId::Rust, rust_config);
@@ -300,6 +305,7 @@ impl MultiLspManager {
         configs.insert(LanguageId::Markdown, markdown_config);
         configs.insert(LanguageId::Html, html_config);
         configs.insert(LanguageId::Python, python_config);
+        configs.insert(LanguageId::Go, go_config);
 
         Self {
             instances: HashMap::new(),
@@ -855,6 +861,7 @@ mod tests {
             servers.markdown,
             servers.html,
             servers.python,
+            servers.go,
         )
     }
 
@@ -925,6 +932,28 @@ mod tests {
         assert_eq!(
             manager.status(Some(Path::new("src/main.rs"))),
             "LSP: rust-analyzer not started (rust)"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn go_extension_routes_to_go_language_server() {
+        let tmp = unique_temp_dir("nevi_lsp_go_route");
+        let workspace_root = tmp.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("create workspace");
+
+        let manager = make_manager(workspace_root);
+
+        assert_eq!(LanguageId::from_extension("go"), Some(LanguageId::Go));
+        assert_eq!(LanguageId::Go.as_lsp_id(), "go");
+        assert_eq!(
+            manager.language_for_path(Path::new("cmd/nevi/main.go")),
+            Some(LanguageId::Go)
+        );
+        assert_eq!(
+            manager.status(Some(Path::new("cmd/nevi/main.go"))),
+            "LSP: gopls not started (go)"
         );
 
         let _ = fs::remove_dir_all(&tmp);

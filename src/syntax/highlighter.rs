@@ -1232,6 +1232,131 @@ pub fn python_highlight_query() -> &'static str {
 "##
 }
 
+/// Get the highlight query for Go
+pub fn go_highlight_query() -> &'static str {
+    r##"
+; Comments
+(comment) @comment
+
+; Strings and runes
+(interpreted_string_literal) @string
+(raw_string_literal) @string
+(rune_literal) @string
+
+; Numbers
+(int_literal) @number
+(float_literal) @number
+(imaginary_literal) @number
+
+; Constants
+(nil) @constant
+(true) @constant
+(false) @constant
+(iota) @constant
+
+; Keywords
+[
+  "break"
+  "case"
+  "chan"
+  "const"
+  "continue"
+  "default"
+  "defer"
+  "else"
+  "fallthrough"
+  "for"
+  "func"
+  "go"
+  "goto"
+  "if"
+  "import"
+  "interface"
+  "map"
+  "package"
+  "range"
+  "return"
+  "select"
+  "struct"
+  "switch"
+  "type"
+  "var"
+] @keyword
+
+; Declarations
+(function_declaration name: (identifier) @function)
+(method_declaration name: (field_identifier) @function)
+(type_declaration (type_spec name: (type_identifier) @type))
+
+; Types and namespaces
+(type_identifier) @type
+(package_identifier) @namespace
+
+; Calls and selectors
+(call_expression function: (identifier) @function)
+(selector_expression field: (field_identifier) @property)
+
+; Identifiers
+(field_identifier) @property
+(identifier) @variable
+
+; Operators
+[
+  "+"
+  "-"
+  "*"
+  "/"
+  "%"
+  "&"
+  "|"
+  "^"
+  "<<"
+  ">>"
+  "&^"
+  "+="
+  "-="
+  "*="
+  "/="
+  "%="
+  "&="
+  "|="
+  "^="
+  "<<="
+  ">>="
+  "&^="
+  "&&"
+  "||"
+  "<-"
+  "++"
+  "--"
+  "=="
+  "<"
+  ">"
+  "="
+  "!"
+  "!="
+  "<="
+  ">="
+  ":="
+  "..."
+] @operator
+
+; Punctuation
+[
+  "("
+  ")"
+  "["
+  "]"
+  "{"
+  "}"
+  "."
+  ","
+  ";"
+  ":"
+] @punctuation
+"##
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1372,6 +1497,11 @@ mod tests {
             python_highlight_query(),
             "Python",
         );
+    }
+
+    #[test]
+    fn go_highlight_query_compiles() {
+        assert_query_compiles(tree_sitter_go::LANGUAGE.into(), go_highlight_query(), "Go");
     }
 
     #[test]

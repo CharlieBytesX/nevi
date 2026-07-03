@@ -121,6 +121,7 @@ where
             &servers.python,
             &is_command_available,
         );
+        add_lsp_tool(&mut grouped, "go", &servers.go, &is_command_available);
     }
 
     for (language, config) in &languages_config.languages {
@@ -212,6 +213,7 @@ pub fn install_command_for(command: &str) -> Option<&'static str> {
         | "vscode-eslint-language-server" => Some("npm install -g vscode-langservers-extracted"),
         "taplo" | "taplo.exe" => Some("cargo install taplo-cli --locked"),
         "pyright-langserver" | "pyright-langserver.cmd" => Some("npm install -g pyright"),
+        "gopls" | "gopls.exe" => Some("go install golang.org/x/tools/gopls@latest"),
         "pylsp" => Some("pipx install python-lsp-server"),
         "biome" | "biome.cmd" => Some("npm install -g @biomejs/biome"),
         "oxfmt" | "oxfmt.cmd" => Some("npm install -g oxfmt"),
@@ -245,6 +247,7 @@ mod tests {
         settings.lsp.servers.markdown.enabled = false;
         settings.lsp.servers.html.enabled = false;
         settings.lsp.servers.python.enabled = false;
+        settings.lsp.servers.go.enabled = false;
     }
 
     #[test]
@@ -256,6 +259,10 @@ mod tests {
         assert_eq!(
             super::install_command_for("rust-analyzer.exe"),
             Some("rustup component add rust-analyzer")
+        );
+        assert_eq!(
+            super::install_command_for("gopls"),
+            Some("go install golang.org/x/tools/gopls@latest")
         );
     }
 

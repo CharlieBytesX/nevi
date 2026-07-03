@@ -69,6 +69,7 @@ impl SyntaxManager {
             Some("yaml") | Some("yml") => self.set_yaml_language(),
             Some("html") | Some("htm") => self.set_html_language(),
             Some("py") | Some("pyi") | Some("pyw") => self.set_python_language(),
+            Some("go") => self.set_go_language(),
             _ => {
                 self.language = None;
                 self.query = None;
@@ -372,6 +373,30 @@ impl SyntaxManager {
             }
             Err(e) => {
                 self.language = Some(format!("python (lang error: {:?})", e));
+            }
+        }
+    }
+
+    /// Set up Go language parser
+    fn set_go_language(&mut self) {
+        let language = tree_sitter_go::LANGUAGE;
+        match self.parser.set_language(&language.into()) {
+            Ok(()) => {
+                self.language = Some("go".to_string());
+
+                let query_source = highlighter::go_highlight_query();
+                match Query::new(&language.into(), query_source) {
+                    Ok(query) => {
+                        self.query = Some(query);
+                    }
+                    Err(e) => {
+                        self.language = Some(format!("go (query error: {:?})", e));
+                        self.query = None;
+                    }
+                }
+            }
+            Err(e) => {
+                self.language = Some(format!("go (lang error: {:?})", e));
             }
         }
     }
@@ -713,6 +738,23 @@ mod tests {
         assert!(
             !syntax.get_line_highlights(1).is_empty(),
             "scss should use the SCSS highlight path instead of plain text"
+        );
+    }
+
+    #[test]
+    fn go_extension_uses_go_highlighting() {
+        let mut syntax = SyntaxManager::new();
+        syntax.set_language_from_path(Path::new("main.go"));
+
+        let mut buffer = Buffer::new();
+        buffer.set_content("package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n");
+        syntax.parse(&buffer);
+
+        assert_eq!(syntax.language_name(), Some("go"));
+        assert!(syntax.has_highlighting());
+        assert!(
+            !syntax.get_line_highlights(0).is_empty(),
+            "go files should use Go syntax highlighting"
         );
     }
 }

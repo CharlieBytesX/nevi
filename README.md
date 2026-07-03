@@ -33,7 +33,7 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 
 - **Vim/neovim keybindings** - Most common keybinds implemented, more being added regularly
 - **Built-in LSP** - rust-analyzer, typescript-language-server, pyright, and more
-- **Tree-sitter syntax highlighting** - Fast, accurate highlighting for Rust, TypeScript, JavaScript, Python, CSS, JSON, TOML, HTML, Markdown
+- **Tree-sitter syntax highlighting** - Fast, accurate highlighting for Rust, Go, TypeScript, JavaScript, Python, CSS, JSON, TOML, HTML, Markdown
 - **Theme selection** - Multiple built-in colorschemes with easy switching
 - **Fuzzy file finder** - Telescope-style file and content search
 - **Previewed project replace** - Project-wide literal replace with a read-only preview and explicit apply step
@@ -142,6 +142,7 @@ Optional tools unlock optional features:
 | CSS / JSON / HTML LSP | `vscode-langservers-extracted` | `npm install -g vscode-langservers-extracted` |
 | TOML LSP | `taplo` | `cargo install taplo-cli --locked` |
 | Python LSP | `pyright` | `npm install -g pyright` |
+| Go LSP | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 | Markdown LSP | `marksman` | Optional and disabled by default |
 | External formatters | Whatever formatter you configure | Examples: `biome`, `prettier`, `black`, `gofmt` |
 | Git signs / `:GitChanges` | A Git repository | No external `git` CLI required |
