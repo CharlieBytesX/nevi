@@ -916,9 +916,11 @@ pub struct Terminal {
     restore_terminal_state_on_drop: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PartialRenderKind {
     StatusLine,
+    EditorRows(Vec<usize>),
+    EditorRowsAndStatusLine(Vec<usize>),
 }
 
 impl Terminal {
@@ -1168,10 +1170,7 @@ impl Terminal {
 
     fn partial_render_kind(editor: &Editor) -> Option<PartialRenderKind> {
         let damage = &editor.render_damage;
-        if damage.is_clean()
-            || damage.requires_full_render()
-            || !damage.dirty_editor_rows().is_empty()
-        {
+        if damage.is_clean() || damage.requires_full_render() {
             return None;
         }
 
@@ -1179,8 +1178,19 @@ impl Terminal {
             return None;
         }
 
-        match (damage.statusline(), damage.command_line()) {
-            (true, false) => Some(PartialRenderKind::StatusLine),
+        let editor_rows = damage.dirty_editor_rows();
+        match (
+            damage.statusline(),
+            damage.command_line(),
+            editor_rows.is_empty(),
+        ) {
+            (true, false, true) => Some(PartialRenderKind::StatusLine),
+            (false, false, false) if Self::can_partial_render_editor_rows(editor, &editor_rows) => {
+                Some(PartialRenderKind::EditorRows(editor_rows))
+            }
+            (true, false, false) if Self::can_partial_render_editor_rows(editor, &editor_rows) => {
+                Some(PartialRenderKind::EditorRowsAndStatusLine(editor_rows))
+            }
             _ => None,
         }
     }
@@ -1203,11 +1213,34 @@ impl Terminal {
             || editor.mode.is_visual()
     }
 
+    fn can_partial_render_editor_rows(editor: &Editor, rows: &[usize]) -> bool {
+        if rows.is_empty()
+            || editor.settings.editor.wrap
+            || editor.explorer.visible
+            || editor.panes().len() != 1
+        {
+            return false;
+        }
+
+        let pane = &editor.panes()[editor.active_pane_idx()];
+        let top = pane.rect.y as usize;
+        let bottom = top + pane.rect.height as usize;
+        rows.iter().all(|row| (top..bottom).contains(row))
+    }
+
     fn render_partial(&mut self, editor: &Editor, kind: PartialRenderKind) -> anyhow::Result<()> {
         execute!(self.stdout, cursor::Hide)?;
 
         match kind {
             PartialRenderKind::StatusLine => {
+                let line_num_width = editor.buffer().len_lines().to_string().len().max(3);
+                self.render_status_line(editor, line_num_width)?;
+            }
+            PartialRenderKind::EditorRows(rows) => {
+                self.render_editor_rows_partial(editor, &rows)?;
+            }
+            PartialRenderKind::EditorRowsAndStatusLine(rows) => {
+                self.render_editor_rows_partial(editor, &rows)?;
                 let line_num_width = editor.buffer().len_lines().to_string().len().max(3);
                 self.render_status_line(editor, line_num_width)?;
             }
@@ -1220,6 +1253,58 @@ impl Terminal {
         }
 
         self.stdout.flush()?;
+        Ok(())
+    }
+
+    fn render_editor_rows_partial(
+        &mut self,
+        editor: &Editor,
+        rows: &[usize],
+    ) -> anyhow::Result<()> {
+        let pane = &editor.panes()[editor.active_pane_idx()];
+        let Some(buffer) = editor.buffer_at(pane.buffer_idx) else {
+            return Ok(());
+        };
+        let buffer_path = buffer.path.clone();
+        let line_num_width = buffer.len_lines().to_string().len().max(3);
+
+        let show_line_numbers = editor.settings.editor.line_numbers;
+        let show_relative = editor.settings.editor.relative_numbers;
+        let highlight_cursor_line = editor.settings.editor.cursor_line;
+        let pane_width = pane.rect.width as usize;
+
+        const SIGN_COLUMN_WIDTH: usize = 2;
+        let text_area_width = if show_line_numbers {
+            pane_width.saturating_sub(SIGN_COLUMN_WIDTH + line_num_width + 1)
+        } else {
+            pane_width.saturating_sub(SIGN_COLUMN_WIDTH)
+        };
+
+        for screen_row in rows {
+            let pane_row = screen_row.saturating_sub(pane.rect.y as usize);
+            let mut row_pane = pane.clone();
+            row_pane.rect.y = *screen_row as u16;
+            row_pane.rect.height = 1;
+            row_pane.viewport_offset = pane.viewport_offset + pane_row;
+
+            self.render_pane_nowrap(
+                editor,
+                &row_pane,
+                buffer,
+                &row_pane.rect,
+                true,
+                line_num_width,
+                None,
+                show_line_numbers,
+                show_relative,
+                highlight_cursor_line,
+                1,
+                pane_width,
+                text_area_width,
+                buffer_path.as_ref(),
+            )?;
+        }
+
         Ok(())
     }
 
@@ -10591,6 +10676,124 @@ mod tests {
         assert!(
             rendered.contains("LSP: ready"),
             "statusline update render should include updated LSP status; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_allows_simple_editor_row_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRows(vec![1])),
+            "simple editor-row damage should be eligible for editor-row partial rendering"
+        );
+    }
+
+    #[test]
+    fn partial_render_after_editor_row_damage_repaints_only_dirty_row() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+
+        let rendered = render_editor_to_string(&editor);
+
+        assert!(
+            rendered.contains("beta target"),
+            "dirty editor-row render should include the marked row; output={rendered:?}"
+        );
+        assert!(
+            !rendered.contains("alpha target") && !rendered.contains("gamma target"),
+            "dirty editor-row render should not repaint neighboring rows; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_rejects_editor_rows_when_layout_is_not_simple() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.settings.editor.wrap = true;
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "wrapped rows should stay on the full-render path"
+        );
+
+        editor.settings.editor.wrap = false;
+        editor.explorer.visible = true;
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "explorer layout should stay on the full-render path"
+        );
+
+        editor.explorer.visible = false;
+        editor.vsplit(None).expect("vertical split should succeed");
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "split layouts should stay on the full-render path"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_rejects_editor_rows_mixed_with_other_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        editor.render_damage.mark_command_line();
+
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "mixed editor/command-line damage should stay on the full-render path"
+        );
+    }
+
+    #[test]
+    fn partial_render_after_editor_row_and_statusline_damage_repaints_both_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        editor.set_lsp_status("LSP: ready");
+
+        let rendered = render_editor_to_string(&editor);
+
+        assert!(
+            rendered.contains("beta target"),
+            "combined editor/status render should include the marked row; output={rendered:?}"
+        );
+        assert!(
+            rendered.contains("LSP: ready"),
+            "combined editor/status render should include the statusline; output={rendered:?}"
+        );
+        assert!(
+            !rendered.contains("alpha target") && !rendered.contains("gamma target"),
+            "combined editor/status render should not repaint neighboring rows; output={rendered:?}"
         );
     }
 

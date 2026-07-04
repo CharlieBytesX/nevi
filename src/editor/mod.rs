@@ -2201,7 +2201,57 @@ impl Editor {
             diags
         };
 
+        for row in self.diagnostic_render_rows_for_uri(
+            &uri,
+            self.diagnostics.get(&uri).map(Vec::as_slice),
+            &diags,
+        ) {
+            self.render_damage.mark_editor_row(row);
+        }
+
         self.diagnostics.insert(uri, diags);
+    }
+
+    fn diagnostic_render_rows_for_uri(
+        &self,
+        uri: &str,
+        old_diags: Option<&[Diagnostic]>,
+        new_diags: &[Diagnostic],
+    ) -> Vec<usize> {
+        let mut rows = std::collections::BTreeSet::new();
+
+        for pane in &self.panes {
+            if pane.rect.height == 0 {
+                continue;
+            }
+
+            let Some(buffer) = self.buffers.get(pane.buffer_idx) else {
+                continue;
+            };
+            if buffer.path.as_ref().map(crate::lsp::path_to_uri).as_deref() != Some(uri) {
+                continue;
+            }
+
+            let first_visible_line = pane.viewport_offset;
+            let last_visible_line =
+                pane.viewport_offset + pane.rect.height.saturating_sub(1) as usize;
+
+            for diag in old_diags.unwrap_or(&[]).iter().chain(new_diags.iter()) {
+                let diag_start = diag.line;
+                let diag_end = diag.end_line.max(diag.line);
+                let visible_start = diag_start.max(first_visible_line);
+                let visible_end = diag_end.min(last_visible_line);
+                if visible_start > visible_end {
+                    continue;
+                }
+
+                for line in visible_start..=visible_end {
+                    rows.insert(pane.rect.y as usize + line - pane.viewport_offset);
+                }
+            }
+        }
+
+        rows.into_iter().collect()
     }
 
     /// Apply text edits from LSP formatting (or other sources)
@@ -12099,6 +12149,39 @@ mod tests {
         let _ = editor.apply_selected_code_action();
 
         assert_eq!(editor.buffer().content(), "abc\n");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn diagnostics_mark_visible_editor_rows_for_current_buffer() {
+        let tmp = unique_temp_dir("nevi_diagnostic_render_damage");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("diagnostics.rs");
+        std::fs::write(&path, "line one\nline two\nline three\nline four\n").expect("write file");
+
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.open_file(path.clone()).expect("open file");
+        let uri = crate::lsp::path_to_uri(&path);
+
+        editor.render_damage.clear_after_full_render();
+        editor.set_diagnostics(
+            uri,
+            vec![Diagnostic {
+                line: 1,
+                end_line: 2,
+                col_start: 0,
+                col_end: 4,
+                severity: DiagnosticSeverity::Error,
+                message: "problem".to_string(),
+                source: None,
+                code: None,
+            }],
+        );
+
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1, 2]);
+        assert!(!editor.render_damage.requires_full_render());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
