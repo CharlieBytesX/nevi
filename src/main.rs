@@ -413,6 +413,7 @@ fn main() -> anyhow::Result<()> {
             &lsp_servers.html,
             &lsp_servers.python,
             &lsp_servers.go,
+            &lsp_servers.ruby,
         ] {
             for marker in &cfg.root_patterns {
                 if marker.trim().is_empty() {
@@ -449,6 +450,7 @@ fn main() -> anyhow::Result<()> {
             lsp_servers.html,
             lsp_servers.python,
             lsp_servers.go,
+            lsp_servers.ruby,
         );
         multi_lsp = Some(mgr);
         editor.set_lsp_status("LSP: (no server)");

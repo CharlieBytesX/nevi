@@ -1,3 +1,4 @@
+pub(crate) mod command_resolver;
 pub mod commands;
 pub mod config;
 pub mod copilot;

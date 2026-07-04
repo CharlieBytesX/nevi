@@ -3678,10 +3678,11 @@ impl Editor {
             self.cursor_wrapped_visual_row_from_viewport(cursor_segment_idx, wrap_width, tab_width);
 
         if cursor_visual_row < scroll_off {
-            if self.cursor.line != self.viewport_offset {
-                self.viewport_offset = self.cursor.line;
+            if self.cursor.line == self.viewport_offset {
+                self.h_offset = cursor_segment_idx.saturating_sub(scroll_off);
+            } else {
+                self.h_offset = 0;
             }
-            self.h_offset = cursor_segment_idx.saturating_sub(scroll_off);
             return;
         }
 
@@ -10778,6 +10779,26 @@ mod tests {
         editor.apply_motion(Motion::DisplayLineUp, 2);
 
         assert_eq!((editor.cursor.line, editor.cursor.col), (0, 1));
+    }
+
+    #[test]
+    fn wrapped_scroll_keeps_short_file_top_visible_when_cursor_moves_down() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.settings.editor.wrap = true;
+        editor.settings.editor.wrap_width = 80;
+        editor.replace_buffer_content(
+            "class Greeter\n  def hello(name)\n    puts \"hello\n#{name}\"\n  end\nend\n",
+        );
+
+        editor.cursor.line = 1;
+        editor.scroll_to_cursor();
+
+        assert_eq!(
+            editor.viewport_offset, 0,
+            "moving down in a short wrapped buffer should keep earlier lines visible"
+        );
+        assert_eq!(editor.panes[editor.active_pane].viewport_offset, 0);
     }
 
     #[test]

@@ -216,7 +216,8 @@ fn client_capabilities() -> ClientCapabilities {
 impl LspClient {
     /// Spawn a new LSP server process
     pub fn spawn(command: &str, args: &[String]) -> Result<(Self, PendingRequests, SharedStdin)> {
-        let mut process = Command::new(command)
+        let resolved_command = crate::command_resolver::resolve_command(command);
+        let mut process = Command::new(&resolved_command)
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -239,7 +240,7 @@ impl LspClient {
             Self {
                 process,
                 stdin,
-                command: command.to_string(),
+                command: resolved_command,
                 request_id: AtomicU64::new(1),
                 pending_requests,
             },

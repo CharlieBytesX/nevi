@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub const PROFILE_LOG_PATH: &str = "/tmp/nevi_profile.log";
 
@@ -500,6 +500,7 @@ where
         command_tool_health_if_enabled("html", &servers.html, is_command_available),
         command_tool_health_if_enabled("python", &servers.python, is_command_available),
         command_tool_health_if_enabled("go", &servers.go, is_command_available),
+        command_tool_health_if_enabled("ruby", &servers.ruby, is_command_available),
     ]
     .into_iter()
     .flatten()
@@ -612,41 +613,7 @@ pub fn profile_enabled_from_value(value: Option<&str>) -> bool {
 }
 
 pub fn command_exists_on_path(command: &str) -> bool {
-    let command = command.trim();
-    if command.is_empty() {
-        return false;
-    }
-
-    let command_path = Path::new(command);
-    if command_path.is_absolute() || command.contains('/') {
-        return is_executable_file(command_path);
-    }
-
-    let Some(path_var) = std::env::var_os("PATH") else {
-        return false;
-    };
-
-    std::env::split_paths(&path_var).any(|dir| is_executable_file(&dir.join(command)))
-}
-
-fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    crate::command_resolver::command_available(command)
 }
 
 fn inspect_toml_file<T>(path: Option<&PathBuf>) -> FileCheckStatus
@@ -701,6 +668,7 @@ fn lsp_server_health(settings: &crate::config::Settings) -> Vec<LspServerHealth>
         server_health("html", &servers.html),
         server_health("python", &servers.python),
         server_health("go", &servers.go),
+        server_health("ruby", &servers.ruby),
     ]
 }
 

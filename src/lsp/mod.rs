@@ -621,7 +621,9 @@ fn detect_language(path: &PathBuf) -> String {
         Some("cpp") | Some("cc") | Some("cxx") => "cpp".to_string(),
         Some("h") | Some("hpp") => "cpp".to_string(),
         Some("java") => "java".to_string(),
-        Some("rb") => "ruby".to_string(),
+        Some("rb") | Some("rake") | Some("gemspec") | Some("ru") | Some("podspec") => {
+            "ruby".to_string()
+        }
         Some("php") => "php".to_string(),
         Some("swift") => "swift".to_string(),
         Some("kt") | Some("kts") => "kotlin".to_string(),
@@ -681,6 +683,11 @@ mod tests {
             ("file.pyi", "python"),
             ("file.pyw", "python"),
             ("file.go", "go"),
+            ("file.rb", "ruby"),
+            ("file.rake", "ruby"),
+            ("file.gemspec", "ruby"),
+            ("config.ru", "ruby"),
+            ("file.podspec", "ruby"),
         ];
 
         for (path, language) in cases {
