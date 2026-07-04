@@ -1357,6 +1357,11 @@ pub fn go_highlight_query() -> &'static str {
 "##
 }
 
+/// Get the highlight query for Ruby
+pub fn ruby_highlight_query() -> &'static str {
+    tree_sitter_ruby::HIGHLIGHTS_QUERY
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1502,6 +1507,15 @@ mod tests {
     #[test]
     fn go_highlight_query_compiles() {
         assert_query_compiles(tree_sitter_go::LANGUAGE.into(), go_highlight_query(), "Go");
+    }
+
+    #[test]
+    fn ruby_highlight_query_compiles() {
+        assert_query_compiles(
+            tree_sitter_ruby::LANGUAGE.into(),
+            ruby_highlight_query(),
+            "Ruby",
+        );
     }
 
     #[test]

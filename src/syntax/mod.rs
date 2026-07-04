@@ -62,6 +62,11 @@ impl SyntaxManager {
     pub fn set_language_from_path(&mut self, path: &Path) {
         let extension = path.extension().and_then(|e| e.to_str());
 
+        if is_ruby_path(path, extension) {
+            self.set_ruby_language();
+            return;
+        }
+
         match extension {
             Some("rs") => self.set_rust_language(),
             Some("js") | Some("mjs") | Some("cjs") => self.set_javascript_language(),
@@ -408,6 +413,30 @@ impl SyntaxManager {
         }
     }
 
+    /// Set up Ruby language parser
+    fn set_ruby_language(&mut self) {
+        let language = tree_sitter_ruby::LANGUAGE;
+        match self.parser.set_language(&language.into()) {
+            Ok(()) => {
+                self.language = Some("ruby".to_string());
+
+                let query_source = highlighter::ruby_highlight_query();
+                match Query::new(&language.into(), query_source) {
+                    Ok(query) => {
+                        self.query = Some(query);
+                    }
+                    Err(e) => {
+                        self.language = Some(format!("ruby (query error: {:?})", e));
+                        self.query = None;
+                    }
+                }
+            }
+            Err(e) => {
+                self.language = Some(format!("ruby (lang error: {:?})", e));
+            }
+        }
+    }
+
     /// Parse the entire buffer
     pub fn parse(&mut self, buffer: &Buffer) {
         if self.language.is_none() {
@@ -676,6 +705,33 @@ fn buffer_to_string(buffer: &Buffer) -> String {
     result
 }
 
+fn is_ruby_path(path: &Path, extension: Option<&str>) -> bool {
+    if matches!(
+        extension,
+        Some("rb" | "rake" | "gemspec" | "ru" | "podspec")
+    ) {
+        return true;
+    }
+
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(
+            "Appraisals"
+                | "Berksfile"
+                | "Brewfile"
+                | "Capfile"
+                | "Cheffile"
+                | "Fastfile"
+                | "Gemfile"
+                | "Guardfile"
+                | "Podfile"
+                | "Rakefile"
+                | "Thorfile"
+                | "Vagrantfile"
+        )
+    )
+}
+
 /// Get the line comment string for a language
 /// Returns the comment prefix (e.g., "// " for Rust/JS, "# " for Python)
 pub fn get_comment_string(language: Option<&str>) -> &'static str {
@@ -759,6 +815,42 @@ mod tests {
         assert!(
             !syntax.get_line_highlights(0).is_empty(),
             "go files should use Go syntax highlighting"
+        );
+    }
+
+    #[test]
+    fn ruby_extension_uses_ruby_highlighting() {
+        let mut syntax = SyntaxManager::new();
+        syntax.set_language_from_path(Path::new("example.rb"));
+
+        let mut buffer = Buffer::new();
+        buffer.set_content(
+            "class Greeter\n  def hello(name)\n    puts \"hello #{name}\"\n  end\nend\n",
+        );
+        syntax.parse(&buffer);
+
+        assert_eq!(syntax.language_name(), Some("ruby"));
+        assert!(syntax.has_highlighting());
+        assert!(
+            !syntax.get_line_highlights(0).is_empty(),
+            "ruby files should use Ruby syntax highlighting"
+        );
+    }
+
+    #[test]
+    fn ruby_known_filenames_use_ruby_highlighting() {
+        let mut syntax = SyntaxManager::new();
+        syntax.set_language_from_path(Path::new("Gemfile"));
+
+        let mut buffer = Buffer::new();
+        buffer.set_content("source \"https://rubygems.org\"\ngem \"rails\"\n");
+        syntax.parse(&buffer);
+
+        assert_eq!(syntax.language_name(), Some("ruby"));
+        assert!(syntax.has_highlighting());
+        assert!(
+            !syntax.get_line_highlights(1).is_empty(),
+            "common Ruby filenames should use Ruby syntax highlighting"
         );
     }
 }

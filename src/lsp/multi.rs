@@ -25,6 +25,7 @@ pub enum LanguageId {
     Html,
     Python,
     Go,
+    Ruby,
 }
 
 impl LanguageId {
@@ -41,15 +42,40 @@ impl LanguageId {
             "html" | "htm" => Some(Self::Html),
             "py" | "pyi" | "pyw" => Some(Self::Python),
             "go" => Some(Self::Go),
+            "rb" | "rake" | "gemspec" | "ru" | "podspec" => Some(Self::Ruby),
             _ => None,
         }
     }
 
     /// Detect language from file path
     pub fn from_path(path: &Path) -> Option<Self> {
+        if Self::is_ruby_path(path) {
+            return Some(Self::Ruby);
+        }
+
         path.extension()
             .and_then(|ext| ext.to_str())
             .and_then(Self::from_extension)
+    }
+
+    fn is_ruby_path(path: &Path) -> bool {
+        matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(
+                "Appraisals"
+                    | "Berksfile"
+                    | "Brewfile"
+                    | "Capfile"
+                    | "Cheffile"
+                    | "Fastfile"
+                    | "Gemfile"
+                    | "Guardfile"
+                    | "Podfile"
+                    | "Rakefile"
+                    | "Thorfile"
+                    | "Vagrantfile"
+            )
+        )
     }
 
     /// Get the LSP language identifier string
@@ -65,6 +91,7 @@ impl LanguageId {
             Self::Html => "html",
             Self::Python => "python",
             Self::Go => "go",
+            Self::Ruby => "ruby",
         }
     }
 }
@@ -101,10 +128,11 @@ pub struct MultiLspManager {
 
 impl MultiLspManager {
     pub fn language_for_path(&self, path: &Path) -> Option<LanguageId> {
-        let ext = path.extension().and_then(|ext| ext.to_str())?;
-        if let Some(lang) = LanguageId::from_extension(ext) {
+        if let Some(lang) = LanguageId::from_path(path) {
             return Some(lang);
         }
+
+        let ext = path.extension().and_then(|ext| ext.to_str())?;
 
         [
             LanguageId::Rust,
@@ -117,6 +145,7 @@ impl MultiLspManager {
             LanguageId::Html,
             LanguageId::Python,
             LanguageId::Go,
+            LanguageId::Ruby,
         ]
         .into_iter()
         .find(|lang| {
@@ -294,6 +323,7 @@ impl MultiLspManager {
         html_config: LspServerConfig,
         python_config: LspServerConfig,
         go_config: LspServerConfig,
+        ruby_config: LspServerConfig,
     ) -> Self {
         let mut configs = HashMap::new();
         configs.insert(LanguageId::Rust, rust_config);
@@ -306,6 +336,7 @@ impl MultiLspManager {
         configs.insert(LanguageId::Html, html_config);
         configs.insert(LanguageId::Python, python_config);
         configs.insert(LanguageId::Go, go_config);
+        configs.insert(LanguageId::Ruby, ruby_config);
 
         Self {
             instances: HashMap::new(),
@@ -862,6 +893,7 @@ mod tests {
             servers.html,
             servers.python,
             servers.go,
+            servers.ruby,
         )
     }
 
@@ -955,6 +987,57 @@ mod tests {
             manager.status(Some(Path::new("cmd/nevi/main.go"))),
             "LSP: gopls not started (go)"
         );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn ruby_paths_route_to_ruby_language_server() {
+        let tmp = unique_temp_dir("nevi_lsp_ruby_route");
+        let workspace_root = tmp.join("workspace");
+        fs::create_dir_all(&workspace_root).expect("create workspace");
+
+        let manager = make_manager(workspace_root);
+
+        assert_eq!(LanguageId::from_extension("rb"), Some(LanguageId::Ruby));
+        assert_eq!(
+            LanguageId::from_path(Path::new("Gemfile")),
+            Some(LanguageId::Ruby)
+        );
+        assert_eq!(LanguageId::Ruby.as_lsp_id(), "ruby");
+        assert_eq!(
+            manager.language_for_path(Path::new("app/models/user.rb")),
+            Some(LanguageId::Ruby)
+        );
+        assert_eq!(
+            manager.language_for_path(Path::new("Gemfile")),
+            Some(LanguageId::Ruby)
+        );
+        assert_eq!(
+            manager.status(Some(Path::new("app/models/user.rb"))),
+            "LSP: ruby-lsp not started (ruby)"
+        );
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_server_root_uses_ruby_root_markers() {
+        let tmp = unique_temp_dir("nevi_lsp_ruby_root");
+        let workspace_root = tmp.join("workspace");
+        let project_root = workspace_root.join("project");
+        let nested = project_root.join("app/models");
+        fs::create_dir_all(&nested).expect("create nested tree");
+        fs::write(
+            project_root.join("Gemfile"),
+            "source \"https://rubygems.org\"\n",
+        )
+        .expect("write Gemfile marker");
+
+        let manager = make_manager(workspace_root.clone());
+        let file_path = nested.join("user.rb");
+        let resolved = manager.resolve_server_root(LanguageId::Ruby, Some(file_path.as_path()));
+        assert_eq!(resolved, project_root);
 
         let _ = fs::remove_dir_all(&tmp);
     }

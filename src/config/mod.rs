@@ -648,6 +648,7 @@ pub struct LspServers {
     pub html: LspServerConfig,
     pub python: LspServerConfig,
     pub go: LspServerConfig,
+    pub ruby: LspServerConfig,
 }
 
 impl Default for LspServers {
@@ -753,6 +754,25 @@ impl Default for LspServers {
                 args: Vec::new(),
                 root_patterns: vec!["go.work".to_string(), "go.mod".to_string()],
                 file_extensions: vec!["go".to_string()],
+            },
+            ruby: LspServerConfig {
+                enabled: true,
+                preset: None,
+                command: "ruby-lsp".to_string(),
+                args: Vec::new(),
+                root_patterns: vec![
+                    "Gemfile".to_string(),
+                    ".ruby-version".to_string(),
+                    ".ruby-gemset".to_string(),
+                    ".rubocop.yml".to_string(),
+                ],
+                file_extensions: vec![
+                    "rb".to_string(),
+                    "rake".to_string(),
+                    "gemspec".to_string(),
+                    "ru".to_string(),
+                    "podspec".to_string(),
+                ],
             },
         }
     }
@@ -1419,7 +1439,7 @@ fn default_config_template() -> &'static str {
 # ============================================================================
 # LSP servers are auto-detected and enabled by default.
 # Supported: rust-analyzer, typescript-language-server, vscode-css-language-server,
-# vscode-json-language-server, taplo, vscode-html-language-server, pyright-langserver, gopls
+# vscode-json-language-server, taplo, vscode-html-language-server, pyright-langserver, gopls, ruby-lsp
 # Optional: marksman for Markdown (disabled by default)
 #
 # To disable LSP entirely:
@@ -1563,6 +1583,7 @@ fn merge_lsp_servers_with_defaults(user: LspServers) -> LspServers {
         html: merge_lsp_server_config(defaults.html, user.html),
         python: merge_lsp_server_config(defaults.python, user.python),
         go: merge_lsp_server_config(defaults.go, user.go),
+        ruby: merge_lsp_server_config(defaults.ruby, user.ruby),
     }
 }
 
@@ -1724,6 +1745,36 @@ mod tests {
         assert_eq!(
             settings.lsp.servers.go.file_extensions,
             vec!["go".to_string()]
+        );
+    }
+
+    #[test]
+    fn ruby_lsp_defaults_use_ruby_lsp() {
+        let settings = Settings::default();
+
+        assert_eq!(settings.lsp.servers.ruby.effective_command(), "ruby-lsp");
+        assert_eq!(
+            settings.lsp.servers.ruby.effective_args(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            settings.lsp.servers.ruby.root_patterns,
+            vec![
+                "Gemfile".to_string(),
+                ".ruby-version".to_string(),
+                ".ruby-gemset".to_string(),
+                ".rubocop.yml".to_string()
+            ]
+        );
+        assert_eq!(
+            settings.lsp.servers.ruby.file_extensions,
+            vec![
+                "rb".to_string(),
+                "rake".to_string(),
+                "gemspec".to_string(),
+                "ru".to_string(),
+                "podspec".to_string()
+            ]
         );
     }
 
