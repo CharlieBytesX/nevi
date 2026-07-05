@@ -6678,9 +6678,124 @@ impl CursorRowDamageCandidate {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ContentRowDamageCandidate {
+    old_line: usize,
+    old_line_count: usize,
+    old_viewport_offset: usize,
+    old_h_offset: usize,
+    old_active_pane: usize,
+    old_buffer_idx: usize,
+    pane_y: usize,
+    pane_height: usize,
+}
+
+impl ContentRowDamageCandidate {
+    fn capture(editor: &Editor, key: KeyEvent) -> Option<Self> {
+        if editor.mode != Mode::Insert
+            || editor.pending_insert_register
+            || editor.pending_insert_normal_once
+            || editor.macros.is_recording()
+            || editor.keymap.remap_insert(key) != key
+            || Terminal::has_partial_render_blocking_ui(editor)
+            || !Self::is_simple_same_line_edit(editor, key)
+        {
+            return None;
+        }
+
+        let active_pane = editor.active_pane_idx();
+        let pane = &editor.panes()[active_pane];
+        Some(Self {
+            old_line: editor.cursor.line,
+            old_line_count: editor.buffer().len_lines(),
+            old_viewport_offset: editor.viewport_offset,
+            old_h_offset: editor.h_offset,
+            old_active_pane: active_pane,
+            old_buffer_idx: pane.buffer_idx,
+            pane_y: pane.rect.y as usize,
+            pane_height: pane.rect.height as usize,
+        })
+    }
+
+    fn is_simple_same_line_edit(editor: &Editor, key: KeyEvent) -> bool {
+        match (key.modifiers, key.code) {
+            (modifiers, KeyCode::Char(ch))
+                if !modifiers.contains(KeyModifiers::CONTROL)
+                    && !modifiers.contains(KeyModifiers::ALT)
+                    && !ch.is_control() =>
+            {
+                !Self::auto_pair_char_can_edit_more_than_one_char(editor, ch)
+            }
+            (KeyModifiers::NONE, KeyCode::Backspace) => {
+                editor.cursor.col > 0 && !Self::backspace_can_edit_auto_pair(editor)
+            }
+            _ => false,
+        }
+    }
+
+    fn auto_pair_char_can_edit_more_than_one_char(editor: &Editor, ch: char) -> bool {
+        editor.settings.editor.auto_pairs
+            && matches!(ch, '(' | '[' | '{' | '"' | '\'' | '`' | ')' | ']' | '}')
+    }
+
+    fn backspace_can_edit_auto_pair(editor: &Editor) -> bool {
+        if !editor.settings.editor.auto_pairs || editor.cursor.col == 0 {
+            return false;
+        }
+
+        let line = editor.cursor.line;
+        let prev_char = editor.buffer().char_at(line, editor.cursor.col - 1);
+        let next_char = editor.buffer().char_at(line, editor.cursor.col);
+        matches!(
+            (prev_char, next_char),
+            (Some('('), Some(')'))
+                | (Some('['), Some(']'))
+                | (Some('{'), Some('}'))
+                | (Some('"'), Some('"'))
+                | (Some('\''), Some('\''))
+                | (Some('`'), Some('`'))
+        )
+    }
+
+    fn apply(self, editor: &mut Editor) {
+        if editor.mode != Mode::Insert
+            || editor.active_pane_idx() != self.old_active_pane
+            || editor.panes()[editor.active_pane_idx()].buffer_idx != self.old_buffer_idx
+            || editor.buffer().len_lines() != self.old_line_count
+            || editor.viewport_offset != self.old_viewport_offset
+            || editor.h_offset != self.old_h_offset
+            || editor.cursor.line != self.old_line
+            || Terminal::has_partial_render_blocking_ui(editor)
+        {
+            return;
+        }
+
+        let Some(row) = self.screen_row_for_line(self.old_line) else {
+            return;
+        };
+        let rows = vec![row];
+        if !Terminal::can_partial_render_editor_rows(editor, &rows) {
+            return;
+        }
+
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(row);
+        editor.render_damage.mark_statusline();
+    }
+
+    fn screen_row_for_line(&self, line: usize) -> Option<usize> {
+        if line < self.old_viewport_offset {
+            return None;
+        }
+        let row = self.pane_y + line - self.old_viewport_offset;
+        (row < self.pane_y + self.pane_height).then_some(row)
+    }
+}
+
 /// Handle a key event and update editor state
 pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
     let cursor_row_damage = CursorRowDamageCandidate::capture(editor, key);
+    let content_row_damage = ContentRowDamageCandidate::capture(editor, key);
 
     // Default key-driven redraws to full-frame because most keys can affect
     // selections, decorations, overlays, or buffer text. Narrow safe paths can
@@ -6815,6 +6930,9 @@ pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
 
     if let Some(cursor_row_damage) = cursor_row_damage {
         cursor_row_damage.apply(editor);
+    }
+    if let Some(content_row_damage) = content_row_damage {
+        content_row_damage.apply(editor);
     }
 }
 
@@ -7678,6 +7796,8 @@ fn replace_completion_text(editor: &mut Editor, trigger_col: usize, text: &str) 
 
 fn handle_insert_mode(editor: &mut Editor, key: KeyEvent) {
     let t_insert_start = std::time::Instant::now();
+    let buffer_version_before = editor.buffer().version();
+    let had_visible_search_matches = !editor.search_matches.is_empty();
 
     // Apply custom keymap remapping for insert mode
     let key = editor.keymap.remap_insert(key);
@@ -8027,6 +8147,10 @@ fn handle_insert_mode(editor: &mut Editor, key: KeyEvent) {
             // Cursor moved to different line - hide completion
             editor.completion.hide();
         }
+    }
+
+    if had_visible_search_matches && editor.buffer().version() != buffer_version_before {
+        editor.refresh_visible_search_matches_for_last_pattern();
     }
 
     // Log slow insert mode operations
@@ -10531,6 +10655,10 @@ mod tests {
         KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
     }
 
+    fn backspace_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)
+    }
+
     fn esc_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
     }
@@ -10719,6 +10847,40 @@ mod tests {
         assert!(
             rendered.contains("Nevi"),
             "search workflow render should include matched text; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    fn insert_edit_before_confirmed_search_match_refreshes_visible_search_highlights() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("## Why Nevi?\n");
+
+        let _ = render_editor_to_string(&editor);
+        handle_key(&mut editor, key('/'));
+        for ch in "Nevi".chars() {
+            handle_key(&mut editor, key(ch));
+        }
+        handle_key(&mut editor, enter_key());
+
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!(editor.search_matches, vec![(0, 7, 11)]);
+
+        editor.cursor.line = 0;
+        editor.cursor.col = 7;
+        handle_key(&mut editor, key('i'));
+        for ch in "testing".chars() {
+            handle_key(&mut editor, key(ch));
+        }
+
+        assert_eq!(
+            editor.buffer().line(0).unwrap().to_string(),
+            "## Why testingNevi?\n"
+        );
+        assert_eq!(
+            editor.search_matches,
+            vec![(0, 14, 18)],
+            "search highlight range should move with the match after insert edits"
         );
     }
 
@@ -11065,6 +11227,122 @@ mod tests {
         assert_eq!(
             Terminal::partial_render_kind(&editor),
             Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1, 2]))
+        );
+    }
+
+    #[test]
+    fn content_row_partial_render_after_insert_char_repaints_current_row_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('X'));
+
+        assert_eq!(editor.buffer().line(1).unwrap().to_string(), "betaX row\n");
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "same-line insert should stay on partial-render path"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1]))
+        );
+    }
+
+    #[test]
+    fn content_row_partial_render_after_backspace_repaints_current_row_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, backspace_key());
+
+        assert_eq!(editor.buffer().line(1).unwrap().to_string(), "bet row\n");
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "same-line backspace should stay on partial-render path"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1]))
+        );
+    }
+
+    #[test]
+    fn content_row_partial_render_after_insert_newline_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, enter_key());
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "multi-line insert must stay on full-render path"
+        );
+    }
+
+    #[test]
+    fn content_row_partial_render_after_insert_with_search_highlights_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.search_matches = vec![(1, 0, 4)];
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('X'));
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "active search highlights should keep insert edits on full-render path"
+        );
+    }
+
+    #[test]
+    fn content_row_partial_render_after_insert_with_wrap_enabled_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.settings.editor.wrap = true;
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('X'));
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "wrapped layout insert edits must stay on full-render path"
         );
     }
 

@@ -6203,6 +6203,16 @@ impl Editor {
         }
     }
 
+    pub fn refresh_visible_search_matches_for_last_pattern(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        if let Some(pattern) = self.search.last_pattern.clone() {
+            self.refresh_visible_search_matches(&pattern);
+        }
+    }
+
     fn cursor_starts_search_match(&self, pattern: &str) -> bool {
         if pattern.is_empty() {
             return false;
