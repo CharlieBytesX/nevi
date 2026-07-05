@@ -236,7 +236,7 @@ impl Theme {
                 b: 194,
             }),
         ); // Cyan (template string interpolations)
-           // New groups for improved Rust highlighting
+        // New groups for improved Rust highlighting
         styles.insert(
             HighlightGroup::Macro,
             SyntaxStyle::new(Color::Rgb {

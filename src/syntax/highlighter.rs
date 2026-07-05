@@ -1761,15 +1761,21 @@ mod tests {
             .get_color_for_capture("comment")
             .expect("comment color");
 
-        assert!(spans
-            .iter()
-            .any(|s| s.fg == property && s.start_col == 0 && s.end_col >= 4));
-        assert!(spans
-            .iter()
-            .any(|s| s.fg == string && s.start_col <= 7 && s.end_col >= 10));
-        assert!(spans
-            .iter()
-            .any(|s| s.fg == comment && s.start_col <= 13 && s.end_col >= 15));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.fg == property && s.start_col == 0 && s.end_col >= 4)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.fg == string && s.start_col <= 7 && s.end_col >= 10)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.fg == comment && s.start_col <= 13 && s.end_col >= 15)
+        );
     }
 
     #[test]
@@ -1781,15 +1787,19 @@ mod tests {
         let boolean = theme
             .get_color_for_capture("boolean")
             .expect("boolean color");
-        assert!(bool_spans
-            .iter()
-            .any(|s| s.fg == boolean && s.start_col <= 9 && s.end_col >= 12));
+        assert!(
+            bool_spans
+                .iter()
+                .any(|s| s.fg == boolean && s.start_col <= 9 && s.end_col >= 12)
+        );
 
         let num_source = "port: 8080";
         let num_spans = get_line_highlights_yaml(num_source, &[0], 0, &theme);
         let number = theme.get_color_for_capture("number").expect("number color");
-        assert!(num_spans
-            .iter()
-            .any(|s| s.fg == number && s.start_col <= 6 && s.end_col >= 9));
+        assert!(
+            num_spans
+                .iter()
+                .any(|s| s.fg == number && s.start_col <= 6 && s.end_col >= 9)
+        );
     }
 }

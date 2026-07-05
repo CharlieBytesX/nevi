@@ -323,9 +323,11 @@ mod tests {
         assert_eq!(report.items[0].labels, vec!["python"]);
         assert_eq!(report.items[0].command, "black");
         assert!(report.items[0].install_command.is_none());
-        assert!(report
-            .render_markdown()
-            .contains("No known install command"));
+        assert!(
+            report
+                .render_markdown()
+                .contains("No known install command")
+        );
     }
 
     #[test]
@@ -341,8 +343,10 @@ mod tests {
             super::collect_tool_install_report(&settings, &LanguagesConfig::default(), |_| true);
 
         assert!(report.items.is_empty());
-        assert!(report
-            .render_markdown()
-            .contains("No missing tools with known checks."));
+        assert!(
+            report
+                .render_markdown()
+                .contains("No missing tools with known checks.")
+        );
     }
 }

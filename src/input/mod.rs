@@ -1,6 +1,6 @@
 pub mod motion;
 
-pub use motion::{apply_motion, Motion};
+pub use motion::{Motion, apply_motion};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

@@ -502,18 +502,26 @@ mod tests {
             render_markdown("Read **bold**, *soft*, `code`, and [docs](https://example.com).");
         let spans = &preview.lines[0].spans;
 
-        assert!(spans
-            .iter()
-            .any(|span| span.text == "bold" && span.style == PreviewSpanStyle::Strong));
-        assert!(spans
-            .iter()
-            .any(|span| span.text == "soft" && span.style == PreviewSpanStyle::Emphasis));
-        assert!(spans
-            .iter()
-            .any(|span| span.text == "code" && span.style == PreviewSpanStyle::InlineCode));
-        assert!(spans
-            .iter()
-            .any(|span| span.text == "docs" && span.style == PreviewSpanStyle::Link));
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.text == "bold" && span.style == PreviewSpanStyle::Strong)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.text == "soft" && span.style == PreviewSpanStyle::Emphasis)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.text == "code" && span.style == PreviewSpanStyle::InlineCode)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.text == "docs" && span.style == PreviewSpanStyle::Link)
+        );
     }
 
     #[test]

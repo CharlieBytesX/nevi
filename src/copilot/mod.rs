@@ -19,10 +19,10 @@ pub mod types;
 pub mod utf16;
 
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::thread::{self, JoinHandle};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 /// Debug logging helper - writes to /tmp/copilot_debug.log
 /// Disabled by default for performance - enable only when debugging Copilot issues

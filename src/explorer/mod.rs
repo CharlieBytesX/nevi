@@ -1718,22 +1718,28 @@ mod tests {
         explorer.expand();
         select_path(&mut explorer, &store);
         explorer.expand();
-        assert!(explorer
-            .flat_view
-            .iter()
-            .any(|node| node.path == store.join("existing.ts")));
+        assert!(
+            explorer
+                .flat_view
+                .iter()
+                .any(|node| node.path == store.join("existing.ts"))
+        );
 
         std::fs::write(store.join("new.ts"), "").expect("write new file");
         explorer.refresh();
 
-        assert!(explorer
-            .flat_view
-            .iter()
-            .any(|node| node.path == store.join("existing.ts")));
-        assert!(explorer
-            .flat_view
-            .iter()
-            .any(|node| node.path == store.join("new.ts")));
+        assert!(
+            explorer
+                .flat_view
+                .iter()
+                .any(|node| node.path == store.join("existing.ts"))
+        );
+        assert!(
+            explorer
+                .flat_view
+                .iter()
+                .any(|node| node.path == store.join("new.ts"))
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

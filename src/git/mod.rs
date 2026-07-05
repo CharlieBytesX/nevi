@@ -789,9 +789,11 @@ mod tests {
 
         assert_eq!(preview.len(), 5);
         assert_eq!(preview.last().map(String::as_str), Some("... (truncated)"));
-        assert!(preview
-            .iter()
-            .all(|line| line.len() <= PREVIEW_BYTE_LIMIT + 1));
+        assert!(
+            preview
+                .iter()
+                .all(|line| line.len() <= PREVIEW_BYTE_LIMIT + 1)
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -897,12 +899,14 @@ mod tests {
 
         let repo = GitRepo::open(&root).expect("open repo");
 
-        assert!(repo
-            .diff_preview(&tracked_path, GitFileStatus::Modified, 0)
-            .is_empty());
-        assert!(repo
-            .diff_preview(&untracked_path, GitFileStatus::Untracked, 0)
-            .is_empty());
+        assert!(
+            repo.diff_preview(&tracked_path, GitFileStatus::Modified, 0)
+                .is_empty()
+        );
+        assert!(
+            repo.diff_preview(&untracked_path, GitFileStatus::Untracked, 0)
+                .is_empty()
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -943,9 +947,11 @@ mod tests {
         let repo = GitRepo::open(&root).expect("open repo");
         let preview = repo.diff_preview(&path, GitFileStatus::Modified, 50);
 
-        assert!(preview
-            .iter()
-            .all(|line| line.len() <= PREVIEW_BYTE_LIMIT + 1));
+        assert!(
+            preview
+                .iter()
+                .all(|line| line.len() <= PREVIEW_BYTE_LIMIT + 1)
+        );
         assert_eq!(preview.last().map(String::as_str), Some("... (truncated)"));
 
         let _ = std::fs::remove_dir_all(&root);
@@ -1085,10 +1091,11 @@ mod tests {
 
         // Should have a delete marker
         assert!(!diff.hunks.is_empty());
-        assert!(diff
-            .hunks
-            .iter()
-            .any(|h| h.status == GitLineStatus::Deleted));
+        assert!(
+            diff.hunks
+                .iter()
+                .any(|h| h.status == GitLineStatus::Deleted)
+        );
     }
 
     #[test]

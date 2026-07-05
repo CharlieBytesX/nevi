@@ -61,7 +61,7 @@ fn finder_preview_match_ranges(line: &str, query: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
-use crate::commands::{parse_command, Command, CommandPopupMode, CommandResult, PendingDigraph};
+use crate::commands::{Command, CommandPopupMode, CommandResult, PendingDigraph, parse_command};
 use crate::config::{CommandModeAction, LeaderAction};
 use crate::editor::{
     Editor, ExpressionRegisterTarget, LspAction, Mode, Pane, PaneDirection, SplitLayout,
@@ -10370,11 +10370,11 @@ pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_diagnostic_underline, apply_labeled_jump_style, diagnostic_at_col,
-        diagnostic_underline_color, execute_command, execute_leader_action,
+        PartialRenderKind, RenderLineColors, RenderLineContext, RenderLineContextFactory,
+        RenderTextOptions, Terminal, apply_diagnostic_underline, apply_labeled_jump_style,
+        diagnostic_at_col, diagnostic_underline_color, execute_command, execute_leader_action,
         finder_preview_match_ranges, handle_insert_mode, handle_key, render_line_text_with_context,
-        replace_completion_text, restore_after_labeled_jump, PartialRenderKind, RenderLineColors,
-        RenderLineContext, RenderLineContextFactory, RenderTextOptions, Terminal,
+        replace_completion_text, restore_after_labeled_jump,
     };
     use crate::commands::{Command, CommandPopupMode};
     use crate::config::{KeymapEntry, Settings};
@@ -11119,11 +11119,13 @@ mod tests {
         assert_eq!(editor.command_line.input, "w");
         assert_eq!(editor.command_line.cursor, 1);
         assert_eq!(editor.command_line.popup_mode, CommandPopupMode::Completion);
-        assert!(editor
-            .command_line
-            .suggestions
-            .iter()
-            .any(|item| item.command == "w"));
+        assert!(
+            editor
+                .command_line
+                .suggestions
+                .iter()
+                .any(|item| item.command == "w")
+        );
     }
 
     #[test]
@@ -11166,11 +11168,13 @@ mod tests {
         assert_eq!(editor.command_line.input, "w");
         assert_eq!(editor.command_line.cursor, 1);
         assert_eq!(editor.command_line.popup_mode, CommandPopupMode::History);
-        assert!(editor
-            .command_line
-            .history_popup_items
-            .iter()
-            .any(|item| item == "write"));
+        assert!(
+            editor
+                .command_line
+                .history_popup_items
+                .iter()
+                .any(|item| item == "write")
+        );
     }
 
     #[test]
@@ -11513,11 +11517,13 @@ mod tests {
             "keep me"
         );
         assert_eq!(editor.explorer.pending_action, Some(ExplorerAction::Add));
-        assert!(editor
-            .status_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Already exists"));
+        assert!(
+            editor
+                .status_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Already exists")
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -11547,11 +11553,13 @@ mod tests {
             "target"
         );
         assert_eq!(editor.explorer.pending_action, Some(ExplorerAction::Rename));
-        assert!(editor
-            .status_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Already exists"));
+        assert!(
+            editor
+                .status_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Already exists")
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -11564,9 +11572,11 @@ mod tests {
         assert_eq!(segments[0].text, "ab");
         assert_eq!(segments[1].text, "\tc");
         assert_eq!(segments[2].text, "d");
-        assert!(segments
-            .iter()
-            .all(|segment| super::text_display_width(&segment.text, 4) <= 5));
+        assert!(
+            segments
+                .iter()
+                .all(|segment| super::text_display_width(&segment.text, 4) <= 5)
+        );
     }
 
     #[test]
@@ -12749,11 +12759,13 @@ mod tests {
         execute_command(&mut editor, Command::Quit);
 
         assert!(!editor.should_quit);
-        assert!(editor
-            .status_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("No write since last change"));
+        assert!(
+            editor
+                .status_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("No write since last change")
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -12782,11 +12794,13 @@ mod tests {
 
         assert_eq!(editor.buffer_count(), 1);
         assert_eq!(editor.buffer().path.as_ref(), Some(&dirty));
-        assert!(editor
-            .status_message
-            .as_deref()
-            .unwrap_or_default()
-            .contains("No write since last change"));
+        assert!(
+            editor
+                .status_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("No write since last change")
+        );
 
         execute_command(&mut editor, Command::BufferDelete(true));
 
@@ -13009,13 +13023,10 @@ mod tests {
         std::fs::write(&path, "fn changed() {}\n").expect("write file");
 
         let mut editor = Editor::default();
-        editor
-            .finder
-            .open_git_changes(vec![crate::finder::FinderItem::new(
-                "M changed.rs".to_string(),
-                path.clone(),
-            )
-            .with_git_status(crate::git::GitFileStatus::Modified)]);
+        editor.finder.open_git_changes(vec![
+            crate::finder::FinderItem::new("M changed.rs".to_string(), path.clone())
+                .with_git_status(crate::git::GitFileStatus::Modified),
+        ]);
         editor.mode = Mode::Finder;
 
         handle_key(
@@ -13036,13 +13047,10 @@ mod tests {
         let path = tmp.join("deleted.rs");
 
         let mut editor = Editor::default();
-        editor
-            .finder
-            .open_git_changes(vec![crate::finder::FinderItem::new(
-                "D deleted.rs".to_string(),
-                path,
-            )
-            .with_git_status(crate::git::GitFileStatus::Deleted)]);
+        editor.finder.open_git_changes(vec![
+            crate::finder::FinderItem::new("D deleted.rs".to_string(), path)
+                .with_git_status(crate::git::GitFileStatus::Deleted),
+        ]);
         editor.mode = Mode::Finder;
 
         handle_key(
@@ -14350,23 +14358,31 @@ mod tests {
 
         assert_eq!(editor.leader_sequence.as_deref(), Some(""));
         let root_items = editor.leader_popup_items();
-        assert!(root_items
-            .iter()
-            .any(|item| item.key == "f" && item.has_children));
-        assert!(root_items
-            .iter()
-            .any(|item| item.key == "w" && item.description == "Save file"));
+        assert!(
+            root_items
+                .iter()
+                .any(|item| item.key == "f" && item.has_children)
+        );
+        assert!(
+            root_items
+                .iter()
+                .any(|item| item.key == "w" && item.description == "Save file")
+        );
 
         handle_key(&mut editor, key('f'));
 
         assert_eq!(editor.leader_sequence.as_deref(), Some("f"));
         let file_items = editor.leader_popup_items();
-        assert!(file_items
-            .iter()
-            .any(|item| item.key == "f" && item.sequence == "ff"));
-        assert!(file_items
-            .iter()
-            .any(|item| item.key == "k" && item.description == "Search keymaps"));
+        assert!(
+            file_items
+                .iter()
+                .any(|item| item.key == "f" && item.sequence == "ff")
+        );
+        assert!(
+            file_items
+                .iter()
+                .any(|item| item.key == "k" && item.description == "Search keymaps")
+        );
     }
 
     #[test]

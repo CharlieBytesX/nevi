@@ -1358,11 +1358,13 @@ mod tests {
     #[test]
     fn git_changes_finder_highlights_path_matches_in_display_text() {
         let mut finder = FuzzyFinder::new();
-        finder.open_git_changes(vec![FinderItem::new(
-            "M src/lib/types.ts".to_string(),
-            PathBuf::from("/repo/src/lib/types.ts"),
-        )
-        .with_git_status(crate::git::GitFileStatus::Modified)]);
+        finder.open_git_changes(vec![
+            FinderItem::new(
+                "M src/lib/types.ts".to_string(),
+                PathBuf::from("/repo/src/lib/types.ts"),
+            )
+            .with_git_status(crate::git::GitFileStatus::Modified),
+        ]);
 
         for ch in "type".chars() {
             finder.insert_char(ch);
@@ -1395,11 +1397,10 @@ mod tests {
     #[test]
     fn git_changes_update_preview_waits_for_injected_content() {
         let mut finder = FuzzyFinder::new();
-        finder.open_git_changes(vec![FinderItem::new(
-            "M src/main.rs".to_string(),
-            PathBuf::from("src/main.rs"),
-        )
-        .with_git_status(crate::git::GitFileStatus::Modified)]);
+        finder.open_git_changes(vec![
+            FinderItem::new("M src/main.rs".to_string(), PathBuf::from("src/main.rs"))
+                .with_git_status(crate::git::GitFileStatus::Modified),
+        ]);
 
         assert_eq!(finder.update_preview_content(), None);
     }
@@ -1525,11 +1526,13 @@ mod tests {
         finder.preview_line = Some(42);
         finder.preview_line_offset = 41;
         finder.grep_search_pending = true;
-        finder.items = vec![FinderItem::new(
-            "src/main.rs:42: old match".to_string(),
-            PathBuf::from("src/main.rs"),
-        )
-        .with_line(42)];
+        finder.items = vec![
+            FinderItem::new(
+                "src/main.rs:42: old match".to_string(),
+                PathBuf::from("src/main.rs"),
+            )
+            .with_line(42),
+        ];
         finder.filtered = vec![0];
 
         finder.update_filter();
@@ -1624,9 +1627,11 @@ mod tests {
             .collect();
 
         assert_eq!(highlighted, "mainmain");
-        assert!(finder.items[0]
-            .match_indices
-            .iter()
-            .all(|idx| *idx >= "src/main.rs:12: ".chars().count()));
+        assert!(
+            finder.items[0]
+                .match_indices
+                .iter()
+                .all(|idx| *idx >= "src/main.rs:12: ".chars().count())
+        );
     }
 }

@@ -1,7 +1,7 @@
 //! LSP client implementation using JSON-RPC over stdio
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -10,7 +10,7 @@ use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use lsp_types::request::{GotoDeclarationParams, GotoImplementationParams};
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
@@ -19,7 +19,7 @@ use lsp_types::{
     TextDocumentPositionParams, VersionedTextDocumentIdentifier, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::types::{
     CodeActionItem, CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity, Location,
@@ -29,7 +29,7 @@ use super::types::{
 #[cfg(test)]
 use super::watched_files::WATCHED_FILES_METHOD;
 use super::watched_files::{
-    parse_register_params, parse_unregister_params, WatcherCommand, WatcherRequestError,
+    WatcherCommand, WatcherRequestError, parse_register_params, parse_unregister_params,
 };
 
 /// Shared pending requests map - maps request ID to request kind

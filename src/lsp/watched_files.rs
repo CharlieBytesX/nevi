@@ -5,16 +5,16 @@ use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use globset::{GlobBuilder, GlobMatcher};
 use lsp_types::{
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions, FileChangeType,
     FileEvent, GlobPattern, OneOf, RegistrationParams, RelativePattern, UnregistrationParams, Url,
     WatchKind,
 };
-use notify::event::{ModifyKind, RenameMode};
 #[cfg(not(test))]
 use notify::RecommendedWatcher;
+use notify::event::{ModifyKind, RenameMode};
 #[cfg(test)]
 use notify::{Config, PollWatcher};
 use notify::{Event, EventKind, RecursiveMode, Watcher};

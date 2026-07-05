@@ -28,9 +28,9 @@ pub mod tool_installer;
 mod vim_oracle;
 
 pub use config::{
-    load_config, AutosaveMode, CopilotSettings, KeymapLookup, LeaderAction, Settings,
+    AutosaveMode, CopilotSettings, KeymapLookup, LeaderAction, Settings, load_config,
 };
-pub use config::{load_languages_config, FormatterConfig, LanguagesConfig};
+pub use config::{FormatterConfig, LanguagesConfig, load_languages_config};
 pub use copilot::types::CopilotNotification;
 pub use copilot::{CopilotManager, CopilotStatus, GhostTextState};
 pub use editor::{
@@ -43,8 +43,8 @@ pub use frecency::FrecencyDb;
 pub use harpoon::Harpoon;
 pub use lsp::{LanguageId, LspManager, LspNotification, LspStatus, MultiLspManager};
 pub use markdown_preview::{
-    render_markdown, MarkdownPreview, MarkdownPreviewState, PreviewLine, PreviewLineKind,
-    PreviewSpan, PreviewSpanStyle,
+    MarkdownPreview, MarkdownPreviewState, PreviewLine, PreviewLineKind, PreviewSpan,
+    PreviewSpanStyle, render_markdown,
 };
 pub use render_damage::RenderDamage;
 pub use terminal::Terminal;

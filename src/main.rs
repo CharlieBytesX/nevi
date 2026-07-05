@@ -5,22 +5,22 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use nevi::copilot::{
-    utf16_to_utf8_col, utf8_to_utf16_col, AuthStatus, CopilotCompletion, CopilotManager,
-    CopilotNotification, CopilotStatus,
+    AuthStatus, CopilotCompletion, CopilotManager, CopilotNotification, CopilotStatus,
+    utf8_to_utf16_col, utf16_to_utf8_col,
 };
 use nevi::editor::{CopilotAction, CopilotGhostText, LspAction};
 use nevi::lsp;
 use nevi::perf::PerfStats;
-use nevi::terminal::{execute_leader_action, handle_key, EditorEvent};
+use nevi::terminal::{EditorEvent, execute_leader_action, handle_key};
 
 use nevi::{
+    AutosaveMode, Editor, LanguageId, LspNotification, Mode, MultiLspManager, Terminal,
     editor::RegisterContent,
     floating_terminal::{
-        is_terminal_selection_clear_key, is_terminal_selection_copy_key,
-        is_terminal_selection_platform_copy_key, TerminalClipboard, TerminalMouseEventResult,
+        TerminalClipboard, TerminalMouseEventResult, is_terminal_selection_clear_key,
+        is_terminal_selection_copy_key, is_terminal_selection_platform_copy_key,
     },
-    load_config, AutosaveMode, Editor, LanguageId, LspNotification, Mode, MultiLspManager,
-    Terminal,
+    load_config,
 };
 
 fn profile_enabled_from_env() -> bool {
@@ -1995,9 +1995,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if profile_enabled {
-        if let (Some(stats), Some(Some(ref mut file))) =
-            (profile_stats.as_ref(), profile_file.as_mut())
-        {
+        if let (Some(stats), Some(Some(file))) = (profile_stats.as_ref(), profile_file.as_mut()) {
             let _ = stats.write_summary(file);
         }
     }
@@ -2418,11 +2416,11 @@ fn find_workspace_root(file_path: &Path, root_markers: &[String]) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_edits_to_file, diagnostic_to_lsp_offsets, editor_lsp_cursor_col, editor_lsp_line_len,
+        CliStartupAction, PickModeAction, TerminalOutputTarget, apply_edits_to_file,
+        diagnostic_to_lsp_offsets, editor_lsp_cursor_col, editor_lsp_line_len,
         lsp_completion_response_matches_current_cursor, lsp_response_matches_current_buffer,
         pick_mode_action_for_key, profile_enabled_from_value, startup_action_from_args,
-        terminal_output_target_for_pick_mode, CliStartupAction, PickModeAction,
-        TerminalOutputTarget,
+        terminal_output_target_for_pick_mode,
     };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use nevi::lsp::types::{Diagnostic, DiagnosticSeverity, TextEdit};

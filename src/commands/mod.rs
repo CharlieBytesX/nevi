@@ -2224,14 +2224,16 @@ mod tests {
         line.refresh_history_popup();
 
         assert!(!line.history_popup_items.is_empty());
-        assert!(line
-            .history_popup_items
-            .iter()
-            .any(|item| item == "FindFiles"));
-        assert!(line
-            .history_popup_items
-            .iter()
-            .any(|item| item == "FindBuffers"));
+        assert!(
+            line.history_popup_items
+                .iter()
+                .any(|item| item == "FindFiles")
+        );
+        assert!(
+            line.history_popup_items
+                .iter()
+                .any(|item| item == "FindBuffers")
+        );
         assert!(!line.history_popup_items.iter().any(|item| item == "Format"));
     }
 }

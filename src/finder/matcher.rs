@@ -1,6 +1,6 @@
-use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo::Matcher;
 use nucleo::Utf32Str;
+use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
 /// Fuzzy matcher wrapper using nucleo
 pub struct FuzzyMatcher {

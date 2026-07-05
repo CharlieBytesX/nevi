@@ -7,9 +7,10 @@ use alacritty_terminal::{
     grid::{Dimensions, Scroll},
     index::{Column, Line},
     term::{
+        ClipboardType, Config, Term, TermMode,
         cell::{Cell, Flags},
         color::Colors,
-        point_to_viewport, ClipboardType, Config, Term, TermMode,
+        point_to_viewport,
     },
     vte::ansi::{
         Color as AlacrittyColor, CursorShape as AlacrittyCursorShape, NamedColor,
@@ -23,7 +24,7 @@ use crossterm::{
     },
     style::Color as CrosstermColor,
 };
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -2478,10 +2479,12 @@ mod tests {
             );
         }
 
-        assert!(terminal
-            .get_visible_lines(4, 20)
-            .iter()
-            .any(|line| line.contains("line-1")));
+        assert!(
+            terminal
+                .get_visible_lines(4, 20)
+                .iter()
+                .any(|line| line.contains("line-1"))
+        );
     }
 
     #[test]
@@ -2540,11 +2543,13 @@ mod tests {
             ),
             TerminalMouseEventResult::Handled
         );
-        assert!(terminal
-            .get_visible_cells(3, 20)
-            .iter()
-            .flatten()
-            .any(|cell| cell.selected));
+        assert!(
+            terminal
+                .get_visible_cells(3, 20)
+                .iter()
+                .flatten()
+                .any(|cell| cell.selected)
+        );
     }
 
     #[test]
@@ -2579,11 +2584,13 @@ mod tests {
             content_area,
         );
 
-        assert!(!terminal
-            .get_visible_cells(3, 20)
-            .iter()
-            .flatten()
-            .any(|cell| cell.selected));
+        assert!(
+            !terminal
+                .get_visible_cells(3, 20)
+                .iter()
+                .flatten()
+                .any(|cell| cell.selected)
+        );
     }
 
     #[test]
@@ -2628,11 +2635,13 @@ mod tests {
             content_area,
         );
 
-        assert!(terminal
-            .get_visible_cells(3, 20)
-            .iter()
-            .flatten()
-            .any(|cell| cell.selected));
+        assert!(
+            terminal
+                .get_visible_cells(3, 20)
+                .iter()
+                .flatten()
+                .any(|cell| cell.selected)
+        );
 
         terminal.send_mouse_event(
             crossterm::event::MouseEvent {
@@ -2645,11 +2654,13 @@ mod tests {
         );
 
         assert_eq!(terminal.copy_selection(), Some("alpha".to_string()));
-        assert!(!terminal
-            .get_visible_cells(3, 20)
-            .iter()
-            .flatten()
-            .any(|cell| cell.selected));
+        assert!(
+            !terminal
+                .get_visible_cells(3, 20)
+                .iter()
+                .flatten()
+                .any(|cell| cell.selected)
+        );
     }
 
     #[test]
@@ -2759,10 +2770,12 @@ mod tests {
         );
         terminal.sessions[0].visible = true;
 
-        assert!(!terminal
-            .get_visible_lines(3, 20)
-            .iter()
-            .any(|line| line.contains("needle old")));
+        assert!(
+            !terminal
+                .get_visible_lines(3, 20)
+                .iter()
+                .any(|line| line.contains("needle old"))
+        );
 
         assert!(
             terminal.handle_search_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL))
@@ -2774,10 +2787,12 @@ mod tests {
         }
 
         assert!(terminal.sessions[0].display_offset() > 0);
-        assert!(terminal
-            .get_visible_lines(3, 20)
-            .iter()
-            .any(|line| line.contains("needle old")));
+        assert!(
+            terminal
+                .get_visible_lines(3, 20)
+                .iter()
+                .any(|line| line.contains("needle old"))
+        );
     }
 
     #[test]

@@ -1,9 +1,9 @@
 use grep_regex::RegexMatcherBuilder;
-use grep_searcher::{sinks::UTF8, SearcherBuilder};
+use grep_searcher::{SearcherBuilder, sinks::UTF8};
 use ignore::WalkBuilder;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::FinderItem;
 

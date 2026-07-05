@@ -2,8 +2,8 @@
 //!
 //! Uses include_str! to embed theme TOML files at compile time.
 
-use super::loader::load_theme_from_toml;
 use super::Theme;
+use super::loader::load_theme_from_toml;
 
 // Bundled theme TOML files
 const ONEDARK_TOML: &str = include_str!("../../themes/onedark.toml");

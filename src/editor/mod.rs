@@ -18,7 +18,7 @@ use crate::explorer::FileExplorer;
 use crate::finder::FuzzyFinder;
 use crate::frecency::FrecencyDb;
 use crate::input::{
-    apply_motion, CaseOperator, InputState, Motion, TextObject, TextObjectModifier, TextObjectType,
+    CaseOperator, InputState, Motion, TextObject, TextObjectModifier, TextObjectType, apply_motion,
 };
 use crate::lsp::types::{CodeActionItem, CompletionItem, Diagnostic, Location, TextEdit};
 use crate::syntax::SyntaxManager;
@@ -11726,10 +11726,12 @@ mod tests {
         editor.switch_to_buffer(1);
         editor.close_current_buffer();
 
-        assert!(editor
-            .panes()
-            .iter()
-            .all(|pane| pane.buffer_idx < editor.buffer_count()));
+        assert!(
+            editor
+                .panes()
+                .iter()
+                .all(|pane| pane.buffer_idx < editor.buffer_count())
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -11902,26 +11904,32 @@ mod tests {
         let mut editor = Editor::default();
         editor.set_project_root(root.clone());
         editor.open_explorer();
-        assert!(editor
-            .explorer
-            .flat_view
-            .iter()
-            .any(|node| node.name == "existing"));
-        assert!(!editor
-            .explorer
-            .flat_view
-            .iter()
-            .any(|node| node.name == "created-outside"));
+        assert!(
+            editor
+                .explorer
+                .flat_view
+                .iter()
+                .any(|node| node.name == "existing")
+        );
+        assert!(
+            !editor
+                .explorer
+                .flat_view
+                .iter()
+                .any(|node| node.name == "created-outside")
+        );
 
         std::fs::create_dir(root.join("created-outside")).expect("create external dir");
 
         let _ = editor.handle_focus_gained();
 
-        assert!(editor
-            .explorer
-            .flat_view
-            .iter()
-            .any(|node| node.name == "created-outside"));
+        assert!(
+            editor
+                .explorer
+                .flat_view
+                .iter()
+                .any(|node| node.name == "created-outside")
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -11945,21 +11953,25 @@ mod tests {
             .position(|node| node.path == root.join("examples"))
             .expect("examples dir should be visible");
         editor.explorer.expand();
-        assert!(editor
-            .explorer
-            .flat_view
-            .iter()
-            .any(|node| node.path == removed_file));
+        assert!(
+            editor
+                .explorer
+                .flat_view
+                .iter()
+                .any(|node| node.path == removed_file)
+        );
 
         std::fs::remove_file(&removed_file).expect("remove external file");
 
         let _ = editor.handle_external_process_finished();
 
-        assert!(!editor
-            .explorer
-            .flat_view
-            .iter()
-            .any(|node| node.path == removed_file));
+        assert!(
+            !editor
+                .explorer
+                .flat_view
+                .iter()
+                .any(|node| node.path == removed_file)
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

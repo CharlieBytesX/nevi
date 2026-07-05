@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::explorer::DEFAULT_EXPLORER_WIDTH;
 
 pub use keymap::{CommandModeAction, ExplorerModeAction, KeymapLookup, LeaderAction, LeaderHint};
-pub use languages::{load_languages_config, FormatterConfig, LanguageConfig, LanguagesConfig};
+pub use languages::{FormatterConfig, LanguageConfig, LanguagesConfig, load_languages_config};
 
 /// Main settings structure
 #[derive(Debug, Clone, Deserialize)]
