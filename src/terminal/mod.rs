@@ -174,6 +174,24 @@ struct RenderLineColors {
     diagnostic_hint_color: Color,
 }
 
+impl RenderLineColors {
+    fn from_editor(editor: &Editor) -> Self {
+        let theme = editor.theme();
+        Self {
+            editor_bg: theme.ui.background,
+            editor_fg: theme.ui.foreground,
+            cursor_line_bg: theme.ui.cursor_line,
+            selection_bg: theme.ui.selection,
+            search_match_bg: theme.ui.search_match_bg,
+            search_match_fg: theme.ui.search_match_fg,
+            jump_label_bg: theme.ui.finder_match,
+            jump_label_fg: Color::Black,
+            diagnostic_error_color: theme.diagnostic.error,
+            diagnostic_hint_color: theme.ui.line_number,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RenderLineCellStyle {
     fg: Color,
@@ -197,6 +215,56 @@ struct RenderLineContext<'a> {
     diagnostics: &'a [&'a Diagnostic],
     colors: RenderLineColors,
     tab_width: usize,
+}
+
+struct RenderLineContextFactory<'a> {
+    visual_range: Option<(usize, usize, usize, usize)>,
+    mode: &'a Mode,
+    search_matches: &'a [(usize, usize, usize)],
+    colors: RenderLineColors,
+    tab_width: usize,
+}
+
+impl<'a> RenderLineContextFactory<'a> {
+    fn new(
+        editor: &'a Editor,
+        visual_range: Option<(usize, usize, usize, usize)>,
+        tab_width: usize,
+    ) -> Self {
+        Self {
+            visual_range,
+            mode: &editor.mode,
+            search_matches: &editor.search_matches,
+            colors: RenderLineColors::from_editor(editor),
+            tab_width,
+        }
+    }
+
+    fn context<'b>(
+        &'b self,
+        line_idx: usize,
+        col_offset: usize,
+        virtual_prefix_chars: usize,
+        highlights: &'b [HighlightSpan],
+        is_cursor_line: bool,
+        jump_labels: &'b [(usize, char)],
+        diagnostics: &'b [&'b Diagnostic],
+    ) -> RenderLineContext<'b> {
+        RenderLineContext {
+            line_idx,
+            col_offset,
+            virtual_prefix_chars,
+            highlights,
+            visual_range: self.visual_range,
+            mode: self.mode,
+            is_cursor_line,
+            search_matches: self.search_matches,
+            jump_labels,
+            diagnostics,
+            colors: self.colors,
+            tab_width: self.tab_width,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -916,9 +984,11 @@ pub struct Terminal {
     restore_terminal_state_on_drop: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PartialRenderKind {
     StatusLine,
+    EditorRows(Vec<usize>),
+    EditorRowsAndStatusLine(Vec<usize>),
 }
 
 impl Terminal {
@@ -1168,10 +1238,7 @@ impl Terminal {
 
     fn partial_render_kind(editor: &Editor) -> Option<PartialRenderKind> {
         let damage = &editor.render_damage;
-        if damage.is_clean()
-            || damage.requires_full_render()
-            || !damage.dirty_editor_rows().is_empty()
-        {
+        if damage.is_clean() || damage.requires_full_render() {
             return None;
         }
 
@@ -1179,8 +1246,19 @@ impl Terminal {
             return None;
         }
 
-        match (damage.statusline(), damage.command_line()) {
-            (true, false) => Some(PartialRenderKind::StatusLine),
+        let editor_rows = damage.dirty_editor_rows();
+        match (
+            damage.statusline(),
+            damage.command_line(),
+            editor_rows.is_empty(),
+        ) {
+            (true, false, true) => Some(PartialRenderKind::StatusLine),
+            (false, false, false) if Self::can_partial_render_editor_rows(editor, &editor_rows) => {
+                Some(PartialRenderKind::EditorRows(editor_rows))
+            }
+            (true, false, false) if Self::can_partial_render_editor_rows(editor, &editor_rows) => {
+                Some(PartialRenderKind::EditorRowsAndStatusLine(editor_rows))
+            }
             _ => None,
         }
     }
@@ -1203,11 +1281,34 @@ impl Terminal {
             || editor.mode.is_visual()
     }
 
+    fn can_partial_render_editor_rows(editor: &Editor, rows: &[usize]) -> bool {
+        if rows.is_empty()
+            || editor.settings.editor.wrap
+            || editor.explorer.visible
+            || editor.panes().len() != 1
+        {
+            return false;
+        }
+
+        let pane = &editor.panes()[editor.active_pane_idx()];
+        let top = pane.rect.y as usize;
+        let bottom = top + pane.rect.height as usize;
+        rows.iter().all(|row| (top..bottom).contains(row))
+    }
+
     fn render_partial(&mut self, editor: &Editor, kind: PartialRenderKind) -> anyhow::Result<()> {
         execute!(self.stdout, cursor::Hide)?;
 
         match kind {
             PartialRenderKind::StatusLine => {
+                let line_num_width = editor.buffer().len_lines().to_string().len().max(3);
+                self.render_status_line(editor, line_num_width)?;
+            }
+            PartialRenderKind::EditorRows(rows) => {
+                self.render_editor_rows_partial(editor, &rows)?;
+            }
+            PartialRenderKind::EditorRowsAndStatusLine(rows) => {
+                self.render_editor_rows_partial(editor, &rows)?;
                 let line_num_width = editor.buffer().len_lines().to_string().len().max(3);
                 self.render_status_line(editor, line_num_width)?;
             }
@@ -1220,6 +1321,58 @@ impl Terminal {
         }
 
         self.stdout.flush()?;
+        Ok(())
+    }
+
+    fn render_editor_rows_partial(
+        &mut self,
+        editor: &Editor,
+        rows: &[usize],
+    ) -> anyhow::Result<()> {
+        let pane = &editor.panes()[editor.active_pane_idx()];
+        let Some(buffer) = editor.buffer_at(pane.buffer_idx) else {
+            return Ok(());
+        };
+        let buffer_path = buffer.path.clone();
+        let line_num_width = buffer.len_lines().to_string().len().max(3);
+
+        let show_line_numbers = editor.settings.editor.line_numbers;
+        let show_relative = editor.settings.editor.relative_numbers;
+        let highlight_cursor_line = editor.settings.editor.cursor_line;
+        let pane_width = pane.rect.width as usize;
+
+        const SIGN_COLUMN_WIDTH: usize = 2;
+        let text_area_width = if show_line_numbers {
+            pane_width.saturating_sub(SIGN_COLUMN_WIDTH + line_num_width + 1)
+        } else {
+            pane_width.saturating_sub(SIGN_COLUMN_WIDTH)
+        };
+
+        for screen_row in rows {
+            let pane_row = screen_row.saturating_sub(pane.rect.y as usize);
+            let mut row_pane = pane.clone();
+            row_pane.rect.y = *screen_row as u16;
+            row_pane.rect.height = 1;
+            row_pane.viewport_offset = pane.viewport_offset + pane_row;
+
+            self.render_pane_nowrap(
+                editor,
+                &row_pane,
+                buffer,
+                &row_pane.rect,
+                true,
+                line_num_width,
+                None,
+                show_line_numbers,
+                show_relative,
+                highlight_cursor_line,
+                1,
+                pane_width,
+                text_area_width,
+                buffer_path.as_ref(),
+            )?;
+        }
+
         Ok(())
     }
 
@@ -1463,10 +1616,8 @@ impl Terminal {
         let cursor_line_bg = theme.ui.cursor_line;
         let editor_bg = theme.ui.background;
         let editor_fg = theme.ui.foreground;
-        let selection_bg = theme.ui.selection;
-        let search_bg = theme.ui.search_match_bg;
-        let search_fg = theme.ui.search_match_fg;
         let tab_width = editor.get_effective_tab_width();
+        let line_context_factory = RenderLineContextFactory::new(editor, visual_range, tab_width);
 
         // Pre-compute URI for diagnostic lookups (avoids repeated string allocations)
         let cached_uri = if is_active {
@@ -1682,32 +1833,15 @@ impl Terminal {
                 } else {
                     Vec::new()
                 };
-                let colors = RenderLineColors {
-                    editor_bg,
-                    editor_fg,
-                    cursor_line_bg,
-                    selection_bg,
-                    search_match_bg: search_bg,
-                    search_match_fg: search_fg,
-                    jump_label_bg: theme.ui.finder_match,
-                    jump_label_fg: Color::Black,
-                    diagnostic_error_color: theme.diagnostic.error,
-                    diagnostic_hint_color: theme.ui.line_number,
-                };
-                let context = RenderLineContext {
-                    line_idx: file_line,
-                    col_offset: segment.start_col,
-                    virtual_prefix_chars: segment.virtual_prefix_chars,
-                    highlights: &highlights,
-                    visual_range,
-                    mode: &editor.mode,
-                    is_cursor_line: highlight_cursor_line && is_cursor_line,
-                    search_matches: &editor.search_matches,
-                    jump_labels: &jump_labels,
-                    diagnostics: &line_diagnostics,
-                    colors,
-                    tab_width,
-                };
+                let context = line_context_factory.context(
+                    file_line,
+                    segment.start_col,
+                    segment.virtual_prefix_chars,
+                    &highlights,
+                    highlight_cursor_line && is_cursor_line,
+                    &jump_labels,
+                    &line_diagnostics,
+                );
 
                 let rendered_cols =
                     self.render_line_segment_with_highlights(segment_text, &context)?;
@@ -1833,6 +1967,7 @@ impl Terminal {
         let editor_bg = theme.ui.background;
         let editor_fg = theme.ui.foreground;
         let tab_width = editor.get_effective_tab_width();
+        let line_context_factory = RenderLineContextFactory::new(editor, visual_range, tab_width);
 
         // Pre-compute URI for diagnostic lookups (avoids repeated string allocations)
         let cached_uri = if is_active {
@@ -2020,41 +2155,20 @@ impl Terminal {
                         Vec::new()
                     };
 
-                    // Get search/selection colors from theme
-                    let selection_bg = theme.ui.selection;
-                    let search_bg = theme.ui.search_match_bg;
-                    let search_fg = theme.ui.search_match_fg;
                     let jump_labels = if is_active {
                         editor.labeled_jump_labels_for_line(file_line)
                     } else {
                         Vec::new()
                     };
-                    let colors = RenderLineColors {
-                        editor_bg,
-                        editor_fg,
-                        cursor_line_bg,
-                        selection_bg,
-                        search_match_bg: search_bg,
-                        search_match_fg: search_fg,
-                        jump_label_bg: theme.ui.finder_match,
-                        jump_label_fg: Color::Black,
-                        diagnostic_error_color: theme.diagnostic.error,
-                        diagnostic_hint_color: theme.ui.line_number,
-                    };
-                    let context = RenderLineContext {
-                        line_idx: file_line,
-                        col_offset: h_offset,
-                        virtual_prefix_chars: 0,
-                        highlights: &highlights,
-                        visual_range,
-                        mode: &editor.mode,
-                        is_cursor_line: highlight_cursor_line && is_cursor_line,
-                        search_matches: &editor.search_matches,
-                        jump_labels: &jump_labels,
-                        diagnostics: &line_diagnostics,
-                        colors,
-                        tab_width,
-                    };
+                    let context = line_context_factory.context(
+                        file_line,
+                        h_offset,
+                        0,
+                        &highlights,
+                        highlight_cursor_line && is_cursor_line,
+                        &jump_labels,
+                        &line_diagnostics,
+                    );
 
                     let rendered_cols = self.render_line_with_highlights(&line_str, &context)?;
 
@@ -7041,6 +7155,10 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
             }
         }
 
+        KeyAction::WriteQuitIfModified => {
+            execute_command(editor, Command::WriteQuitIfModified);
+        }
+
         // Window/pane operations
         KeyAction::WindowSplitVertical => {
             if let Err(e) = editor.vsplit(None) {
@@ -10252,9 +10370,9 @@ pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
 #[cfg(test)]
 mod tests {
     use super::{
-        PartialRenderKind, RenderLineColors, RenderLineContext, RenderTextOptions, Terminal,
-        apply_diagnostic_underline, apply_labeled_jump_style, diagnostic_at_col,
-        diagnostic_underline_color, execute_command, execute_leader_action,
+        PartialRenderKind, RenderLineColors, RenderLineContext, RenderLineContextFactory,
+        RenderTextOptions, Terminal, apply_diagnostic_underline, apply_labeled_jump_style,
+        diagnostic_at_col, diagnostic_underline_color, execute_command, execute_leader_action,
         finder_preview_match_ranges, handle_insert_mode, handle_key, render_line_text_with_context,
         replace_completion_text, restore_after_labeled_jump,
     };
@@ -10591,6 +10709,124 @@ mod tests {
         assert!(
             rendered.contains("LSP: ready"),
             "statusline update render should include updated LSP status; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_allows_simple_editor_row_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRows(vec![1])),
+            "simple editor-row damage should be eligible for editor-row partial rendering"
+        );
+    }
+
+    #[test]
+    fn partial_render_after_editor_row_damage_repaints_only_dirty_row() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+
+        let rendered = render_editor_to_string(&editor);
+
+        assert!(
+            rendered.contains("beta target"),
+            "dirty editor-row render should include the marked row; output={rendered:?}"
+        );
+        assert!(
+            !rendered.contains("alpha target") && !rendered.contains("gamma target"),
+            "dirty editor-row render should not repaint neighboring rows; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_rejects_editor_rows_when_layout_is_not_simple() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.settings.editor.wrap = true;
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "wrapped rows should stay on the full-render path"
+        );
+
+        editor.settings.editor.wrap = false;
+        editor.explorer.visible = true;
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "explorer layout should stay on the full-render path"
+        );
+
+        editor.explorer.visible = false;
+        editor.vsplit(None).expect("vertical split should succeed");
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "split layouts should stay on the full-render path"
+        );
+    }
+
+    #[test]
+    fn partial_render_kind_rejects_editor_rows_mixed_with_other_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        editor.render_damage.mark_command_line();
+
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            None,
+            "mixed editor/command-line damage should stay on the full-render path"
+        );
+    }
+
+    #[test]
+    fn partial_render_after_editor_row_and_statusline_damage_repaints_both_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha target\nbeta target\ngamma target\n");
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+        editor.render_damage.mark_editor_row(1);
+        editor.set_lsp_status("LSP: ready");
+
+        let rendered = render_editor_to_string(&editor);
+
+        assert!(
+            rendered.contains("beta target"),
+            "combined editor/status render should include the marked row; output={rendered:?}"
+        );
+        assert!(
+            rendered.contains("LSP: ready"),
+            "combined editor/status render should include the statusline; output={rendered:?}"
+        );
+        assert!(
+            !rendered.contains("alpha target") && !rendered.contains("gamma target"),
+            "combined editor/status render should not repaint neighboring rows; output={rendered:?}"
         );
     }
 
@@ -11535,6 +11771,40 @@ mod tests {
     }
 
     #[test]
+    fn render_line_context_factory_applies_editor_render_defaults() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha\nbeta\n");
+        editor.search_matches = vec![(1, 0, 4)];
+        let highlights = Vec::<HighlightSpan>::new();
+        let diagnostics = Vec::<&Diagnostic>::new();
+        let jump_labels = Vec::<(usize, char)>::new();
+
+        let factory = RenderLineContextFactory::new(&editor, Some((1, 0, 1, 3)), 8);
+        let context = factory.context(1, 2, 1, &highlights, true, &jump_labels, &diagnostics);
+
+        assert_eq!(context.line_idx, 1);
+        assert_eq!(context.col_offset, 2);
+        assert_eq!(context.virtual_prefix_chars, 1);
+        assert_eq!(context.visual_range, Some((1, 0, 1, 3)));
+        assert_eq!(context.mode, &editor.mode);
+        assert_eq!(context.search_matches, editor.search_matches.as_slice());
+        assert_eq!(context.colors.editor_bg, editor.theme().ui.background);
+        assert_eq!(context.colors.editor_fg, editor.theme().ui.foreground);
+        assert_eq!(context.colors.cursor_line_bg, editor.theme().ui.cursor_line);
+        assert_eq!(context.colors.selection_bg, editor.theme().ui.selection);
+        assert_eq!(
+            context.colors.search_match_bg,
+            editor.theme().ui.search_match_bg
+        );
+        assert_eq!(
+            context.colors.search_match_fg,
+            editor.theme().ui.search_match_fg
+        );
+        assert_eq!(context.tab_width, 8);
+    }
+
+    #[test]
     fn render_line_text_with_context_can_extend_visual_selection_past_line_end() {
         crossterm::style::force_color_output(true);
         let diagnostics = Vec::<&Diagnostic>::new();
@@ -11836,6 +12106,68 @@ mod tests {
             "local edit\n"
         );
         assert!(!editor.buffer().dirty);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_zz_writes_modified_file_and_quits() {
+        let tmp = unique_temp_dir("nevi_normal_zz_write_quit");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("note.txt");
+        std::fs::write(&path, "original\n").expect("write original");
+
+        let mut editor = Editor::default();
+        editor.open_file(path.clone()).expect("open file");
+        editor.replace_buffer_content("local edit\n");
+
+        handle_key(&mut editor, shift_key('Z'));
+        handle_key(&mut editor, shift_key('Z'));
+
+        assert!(editor.should_quit);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read saved file"),
+            "local edit\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_zz_refuses_dirty_unnamed_buffer_without_quitting() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("scratch edit\n");
+
+        handle_key(&mut editor, shift_key('Z'));
+        handle_key(&mut editor, shift_key('Z'));
+
+        assert!(!editor.should_quit);
+        assert_eq!(editor.status_message.as_deref(), Some("E: No filename"));
+    }
+
+    #[test]
+    fn normal_keymap_can_bind_custom_key_to_write_quit_if_modified() {
+        let tmp = unique_temp_dir("nevi_normal_keymap_write_quit");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("note.txt");
+        std::fs::write(&path, "original\n").expect("write original");
+
+        let mut settings = Settings::default();
+        settings.keymap.normal.push(KeymapEntry {
+            from: "Q".to_string(),
+            to: ":x<CR>".to_string(),
+        });
+        let mut editor = Editor::new(settings);
+        editor.open_file(path.clone()).expect("open file");
+        editor.replace_buffer_content("local edit\n");
+
+        handle_key(&mut editor, shift_key('Q'));
+
+        assert!(editor.should_quit);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read saved file"),
+            "local edit\n"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
