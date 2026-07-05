@@ -57,6 +57,9 @@ jobs:
       - name: Run Rust tests
         run: cargo test --quiet
 
+      - name: Run render frame-budget guard
+        run: cargo test render_frame_budget -- --ignored --nocapture
+
       - name: Install Neovim for parity smoke test on macOS
         if: runner.os == 'macOS'
         run: brew install neovim
