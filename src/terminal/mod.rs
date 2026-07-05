@@ -10387,11 +10387,12 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crossterm::style::{Color, SetBackgroundColor};
     use std::cell::RefCell;
+    use std::fmt::Write as FmtWrite;
     use std::io::{self, Write};
     use std::path::Path;
     use std::path::PathBuf;
     use std::rc::Rc;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     fn key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
@@ -10457,6 +10458,71 @@ mod tests {
         output.into_string()
     }
 
+    fn measure_render(editor: &Editor) -> Duration {
+        crossterm::style::force_color_output(true);
+        let output = SharedOutput::default();
+        let mut terminal = Terminal::new_for_test(Box::new(output));
+        let start = Instant::now();
+        terminal.render(editor).expect("render should succeed");
+        start.elapsed()
+    }
+
+    fn assert_render_frame_budget(
+        name: &str,
+        editor: &Editor,
+        iterations: usize,
+        p95_budget: Duration,
+    ) {
+        assert!(iterations > 0);
+        let _ = measure_render(editor);
+
+        let mut samples: Vec<Duration> = (0..iterations).map(|_| measure_render(editor)).collect();
+        samples.sort();
+        let p95_idx = ((samples.len() - 1) * 95) / 100;
+        let p95 = samples[p95_idx];
+        let max = *samples.last().expect("samples");
+
+        eprintln!(
+            "{name}: iterations={} p95={:?} max={:?} budget={:?}",
+            samples.len(),
+            p95,
+            max,
+            p95_budget
+        );
+        assert!(
+            p95 <= p95_budget,
+            "{name} render p95 exceeded budget: p95={p95:?}, budget={p95_budget:?}, max={max:?}"
+        );
+    }
+
+    fn large_numbered_document(line_count: usize) -> String {
+        let mut text = String::with_capacity(line_count * 24);
+        for line in 0..line_count {
+            let _ = writeln!(
+                &mut text,
+                "line {line:06} old render target with stable viewport text"
+            );
+        }
+        text
+    }
+
+    fn minified_js_document(entry_count: usize) -> String {
+        let mut text = String::with_capacity(entry_count * 56);
+        text.push_str("const data=[");
+        for id in 0..entry_count {
+            if id > 0 {
+                text.push(',');
+            }
+            let _ = write!(
+                &mut text,
+                "{{id:{id},name:\"old_render_target_{id}\",active:true,value:{}}}",
+                id * 3
+            );
+        }
+        text.push_str("];\n");
+        text
+    }
+
     fn background_sequence(color: Color) -> String {
         let mut output = Vec::new();
         crossterm::execute!(output, SetBackgroundColor(color)).expect("write ansi background");
@@ -10478,6 +10544,43 @@ mod tests {
         assert!(
             rendered.contains("beta"),
             "full render output should include second buffer line; output={rendered:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "CI render frame-budget guard; run explicitly with cargo test render_frame_budget -- --ignored --nocapture"]
+    fn render_frame_budget_large_multiline_file_stays_bounded() {
+        let mut editor = Editor::default();
+        editor.set_size(120, 40);
+        editor.replace_buffer_content(&large_numbered_document(100_000));
+        editor.cursor.line = 50_000;
+        editor.viewport_offset = 49_985;
+        editor.render_damage.clear_after_full_render();
+
+        assert_render_frame_budget(
+            "large multiline file",
+            &editor,
+            5,
+            Duration::from_millis(100),
+        );
+    }
+
+    #[test]
+    #[ignore = "CI render frame-budget guard; run explicitly with cargo test render_frame_budget -- --ignored --nocapture"]
+    fn render_frame_budget_minified_one_line_file_stays_bounded() {
+        let mut editor = Editor::default();
+        editor.set_size(120, 40);
+        editor.replace_buffer_content(&minified_js_document(25_000));
+        editor.cursor.line = 0;
+        editor.cursor.col = 350_000;
+        editor.h_offset = 4_800;
+        editor.render_damage.clear_after_full_render();
+
+        assert_render_frame_budget(
+            "minified one-line file",
+            &editor,
+            5,
+            Duration::from_millis(500),
         );
     }
 
