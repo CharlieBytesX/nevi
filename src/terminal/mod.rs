@@ -174,6 +174,24 @@ struct RenderLineColors {
     diagnostic_hint_color: Color,
 }
 
+impl RenderLineColors {
+    fn from_editor(editor: &Editor) -> Self {
+        let theme = editor.theme();
+        Self {
+            editor_bg: theme.ui.background,
+            editor_fg: theme.ui.foreground,
+            cursor_line_bg: theme.ui.cursor_line,
+            selection_bg: theme.ui.selection,
+            search_match_bg: theme.ui.search_match_bg,
+            search_match_fg: theme.ui.search_match_fg,
+            jump_label_bg: theme.ui.finder_match,
+            jump_label_fg: Color::Black,
+            diagnostic_error_color: theme.diagnostic.error,
+            diagnostic_hint_color: theme.ui.line_number,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RenderLineCellStyle {
     fg: Color,
@@ -197,6 +215,56 @@ struct RenderLineContext<'a> {
     diagnostics: &'a [&'a Diagnostic],
     colors: RenderLineColors,
     tab_width: usize,
+}
+
+struct RenderLineContextFactory<'a> {
+    visual_range: Option<(usize, usize, usize, usize)>,
+    mode: &'a Mode,
+    search_matches: &'a [(usize, usize, usize)],
+    colors: RenderLineColors,
+    tab_width: usize,
+}
+
+impl<'a> RenderLineContextFactory<'a> {
+    fn new(
+        editor: &'a Editor,
+        visual_range: Option<(usize, usize, usize, usize)>,
+        tab_width: usize,
+    ) -> Self {
+        Self {
+            visual_range,
+            mode: &editor.mode,
+            search_matches: &editor.search_matches,
+            colors: RenderLineColors::from_editor(editor),
+            tab_width,
+        }
+    }
+
+    fn context<'b>(
+        &'b self,
+        line_idx: usize,
+        col_offset: usize,
+        virtual_prefix_chars: usize,
+        highlights: &'b [HighlightSpan],
+        is_cursor_line: bool,
+        jump_labels: &'b [(usize, char)],
+        diagnostics: &'b [&'b Diagnostic],
+    ) -> RenderLineContext<'b> {
+        RenderLineContext {
+            line_idx,
+            col_offset,
+            virtual_prefix_chars,
+            highlights,
+            visual_range: self.visual_range,
+            mode: self.mode,
+            is_cursor_line,
+            search_matches: self.search_matches,
+            jump_labels,
+            diagnostics,
+            colors: self.colors,
+            tab_width: self.tab_width,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1548,10 +1616,8 @@ impl Terminal {
         let cursor_line_bg = theme.ui.cursor_line;
         let editor_bg = theme.ui.background;
         let editor_fg = theme.ui.foreground;
-        let selection_bg = theme.ui.selection;
-        let search_bg = theme.ui.search_match_bg;
-        let search_fg = theme.ui.search_match_fg;
         let tab_width = editor.get_effective_tab_width();
+        let line_context_factory = RenderLineContextFactory::new(editor, visual_range, tab_width);
 
         // Pre-compute URI for diagnostic lookups (avoids repeated string allocations)
         let cached_uri = if is_active {
@@ -1767,32 +1833,15 @@ impl Terminal {
                 } else {
                     Vec::new()
                 };
-                let colors = RenderLineColors {
-                    editor_bg,
-                    editor_fg,
-                    cursor_line_bg,
-                    selection_bg,
-                    search_match_bg: search_bg,
-                    search_match_fg: search_fg,
-                    jump_label_bg: theme.ui.finder_match,
-                    jump_label_fg: Color::Black,
-                    diagnostic_error_color: theme.diagnostic.error,
-                    diagnostic_hint_color: theme.ui.line_number,
-                };
-                let context = RenderLineContext {
-                    line_idx: file_line,
-                    col_offset: segment.start_col,
-                    virtual_prefix_chars: segment.virtual_prefix_chars,
-                    highlights: &highlights,
-                    visual_range,
-                    mode: &editor.mode,
-                    is_cursor_line: highlight_cursor_line && is_cursor_line,
-                    search_matches: &editor.search_matches,
-                    jump_labels: &jump_labels,
-                    diagnostics: &line_diagnostics,
-                    colors,
-                    tab_width,
-                };
+                let context = line_context_factory.context(
+                    file_line,
+                    segment.start_col,
+                    segment.virtual_prefix_chars,
+                    &highlights,
+                    highlight_cursor_line && is_cursor_line,
+                    &jump_labels,
+                    &line_diagnostics,
+                );
 
                 let rendered_cols =
                     self.render_line_segment_with_highlights(segment_text, &context)?;
@@ -1918,6 +1967,7 @@ impl Terminal {
         let editor_bg = theme.ui.background;
         let editor_fg = theme.ui.foreground;
         let tab_width = editor.get_effective_tab_width();
+        let line_context_factory = RenderLineContextFactory::new(editor, visual_range, tab_width);
 
         // Pre-compute URI for diagnostic lookups (avoids repeated string allocations)
         let cached_uri = if is_active {
@@ -2105,41 +2155,20 @@ impl Terminal {
                         Vec::new()
                     };
 
-                    // Get search/selection colors from theme
-                    let selection_bg = theme.ui.selection;
-                    let search_bg = theme.ui.search_match_bg;
-                    let search_fg = theme.ui.search_match_fg;
                     let jump_labels = if is_active {
                         editor.labeled_jump_labels_for_line(file_line)
                     } else {
                         Vec::new()
                     };
-                    let colors = RenderLineColors {
-                        editor_bg,
-                        editor_fg,
-                        cursor_line_bg,
-                        selection_bg,
-                        search_match_bg: search_bg,
-                        search_match_fg: search_fg,
-                        jump_label_bg: theme.ui.finder_match,
-                        jump_label_fg: Color::Black,
-                        diagnostic_error_color: theme.diagnostic.error,
-                        diagnostic_hint_color: theme.ui.line_number,
-                    };
-                    let context = RenderLineContext {
-                        line_idx: file_line,
-                        col_offset: h_offset,
-                        virtual_prefix_chars: 0,
-                        highlights: &highlights,
-                        visual_range,
-                        mode: &editor.mode,
-                        is_cursor_line: highlight_cursor_line && is_cursor_line,
-                        search_matches: &editor.search_matches,
-                        jump_labels: &jump_labels,
-                        diagnostics: &line_diagnostics,
-                        colors,
-                        tab_width,
-                    };
+                    let context = line_context_factory.context(
+                        file_line,
+                        h_offset,
+                        0,
+                        &highlights,
+                        highlight_cursor_line && is_cursor_line,
+                        &jump_labels,
+                        &line_diagnostics,
+                    );
 
                     let rendered_cols = self.render_line_with_highlights(&line_str, &context)?;
 
@@ -10341,7 +10370,7 @@ mod tests {
         diagnostic_underline_color, execute_command, execute_leader_action,
         finder_preview_match_ranges, handle_insert_mode, handle_key, render_line_text_with_context,
         replace_completion_text, restore_after_labeled_jump, PartialRenderKind, RenderLineColors,
-        RenderLineContext, RenderTextOptions, Terminal,
+        RenderLineContext, RenderLineContextFactory, RenderTextOptions, Terminal,
     };
     use crate::commands::{Command, CommandPopupMode};
     use crate::config::{KeymapEntry, Settings};
@@ -11725,6 +11754,40 @@ mod tests {
         assert_eq!(cell.fg, Color::Black);
         assert!(!cell.bold, "search match should not inherit syntax bold");
         assert_eq!(cell.underline_color, None);
+    }
+
+    #[test]
+    fn render_line_context_factory_applies_editor_render_defaults() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha\nbeta\n");
+        editor.search_matches = vec![(1, 0, 4)];
+        let highlights = Vec::<HighlightSpan>::new();
+        let diagnostics = Vec::<&Diagnostic>::new();
+        let jump_labels = Vec::<(usize, char)>::new();
+
+        let factory = RenderLineContextFactory::new(&editor, Some((1, 0, 1, 3)), 8);
+        let context = factory.context(1, 2, 1, &highlights, true, &jump_labels, &diagnostics);
+
+        assert_eq!(context.line_idx, 1);
+        assert_eq!(context.col_offset, 2);
+        assert_eq!(context.virtual_prefix_chars, 1);
+        assert_eq!(context.visual_range, Some((1, 0, 1, 3)));
+        assert_eq!(context.mode, &editor.mode);
+        assert_eq!(context.search_matches, editor.search_matches.as_slice());
+        assert_eq!(context.colors.editor_bg, editor.theme().ui.background);
+        assert_eq!(context.colors.editor_fg, editor.theme().ui.foreground);
+        assert_eq!(context.colors.cursor_line_bg, editor.theme().ui.cursor_line);
+        assert_eq!(context.colors.selection_bg, editor.theme().ui.selection);
+        assert_eq!(
+            context.colors.search_match_bg,
+            editor.theme().ui.search_match_bg
+        );
+        assert_eq!(
+            context.colors.search_match_fg,
+            editor.theme().ui.search_match_fg
+        );
+        assert_eq!(context.tab_width, 8);
     }
 
     #[test]
