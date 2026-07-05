@@ -112,6 +112,7 @@ Required for Homebrew install on macOS:
 Required to build from source:
 
 - Rust toolchain with `cargo`
+  - Minimum Rust version is 1.85
 - Git, if cloning the repository with `git clone`
 - macOS: Xcode Command Line Tools if your Rust setup prompts for native build tools
 - Linux: native build packages such as `build-essential`, `pkg-config`, and
