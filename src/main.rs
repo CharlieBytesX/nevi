@@ -44,6 +44,28 @@ fn editor_redraw_interval(
     }
 }
 
+fn should_continue_input_batch(
+    events_processed: usize,
+    max_events_per_frame: usize,
+    input_ready: bool,
+) -> bool {
+    input_ready && events_processed < max_events_per_frame
+}
+
+fn finish_input_batch_event(
+    terminal: &Terminal,
+    events_processed: &mut usize,
+    max_events_per_frame: usize,
+) -> anyhow::Result<bool> {
+    *events_processed += 1;
+    let input_ready = terminal.poll_key(Duration::from_millis(0))?;
+    Ok(should_continue_input_batch(
+        *events_processed,
+        max_events_per_frame,
+        input_ready,
+    ))
+}
+
 fn editor_lsp_cursor_col(editor: &Editor) -> u32 {
     editor_lsp_col(editor, editor.cursor.line, editor.cursor.col)
 }
@@ -573,8 +595,11 @@ fn main() -> anyhow::Result<()> {
                                     }
                                 }
                             }
-                            events_processed += 1;
-                            if !terminal.poll_key(Duration::from_millis(0))? {
+                            if !finish_input_batch_event(
+                                &terminal,
+                                &mut events_processed,
+                                max_key_events_per_frame,
+                            )? {
                                 break;
                             }
                             continue;
@@ -600,8 +625,11 @@ fn main() -> anyhow::Result<()> {
                                 needs_redraw = true;
                                 redraw_from_input = true;
                             }
-                            events_processed += 1;
-                            if !terminal.poll_key(Duration::from_millis(0))? {
+                            if !finish_input_batch_event(
+                                &terminal,
+                                &mut events_processed,
+                                max_key_events_per_frame,
+                            )? {
                                 break;
                             }
                             continue;
@@ -629,8 +657,11 @@ fn main() -> anyhow::Result<()> {
                         if editor.floating_terminal.handle_search_key(key) {
                             last_input_at = Some(Instant::now());
                             terminal_redraw_pending = true;
-                            events_processed += 1;
-                            if !terminal.poll_key(Duration::from_millis(0))? {
+                            if !finish_input_batch_event(
+                                &terminal,
+                                &mut events_processed,
+                                max_key_events_per_frame,
+                            )? {
                                 break;
                             }
                             continue;
@@ -650,8 +681,11 @@ fn main() -> anyhow::Result<()> {
                             last_input_at = Some(Instant::now());
                             needs_redraw = true;
                             redraw_from_input = true;
-                            events_processed += 1;
-                            if !terminal.poll_key(Duration::from_millis(0))? {
+                            if !finish_input_batch_event(
+                                &terminal,
+                                &mut events_processed,
+                                max_key_events_per_frame,
+                            )? {
                                 break;
                             }
                             continue;
@@ -661,8 +695,11 @@ fn main() -> anyhow::Result<()> {
                             editor.floating_terminal.clear_selection();
                             last_input_at = Some(Instant::now());
                             terminal_redraw_pending = true;
-                            events_processed += 1;
-                            if !terminal.poll_key(Duration::from_millis(0))? {
+                            if !finish_input_batch_event(
+                                &terminal,
+                                &mut events_processed,
+                                max_key_events_per_frame,
+                            )? {
                                 break;
                             }
                             continue;
@@ -713,8 +750,11 @@ fn main() -> anyhow::Result<()> {
                     last_input_at = Some(Instant::now());
 
                     if key_went_to_terminal {
-                        events_processed += 1;
-                        if !terminal.poll_key(Duration::from_millis(0))? {
+                        if !finish_input_batch_event(
+                            &terminal,
+                            &mut events_processed,
+                            max_key_events_per_frame,
+                        )? {
                             break;
                         }
                         continue;
@@ -1164,8 +1204,11 @@ fn main() -> anyhow::Result<()> {
                     needs_redraw = true;
                     redraw_from_input = true;
                 }
-                events_processed += 1;
-                if !terminal.poll_key(Duration::from_millis(0))? {
+                if !finish_input_batch_event(
+                    &terminal,
+                    &mut events_processed,
+                    max_key_events_per_frame,
+                )? {
                     break;
                 }
             }
@@ -2646,6 +2689,19 @@ mod tests {
             super::editor_redraw_interval(false, render_interval, lsp_render_interval),
             lsp_render_interval
         );
+    }
+
+    #[test]
+    fn input_batch_continues_while_ready_and_below_cap() {
+        assert!(super::should_continue_input_batch(1, 8, true));
+        assert!(super::should_continue_input_batch(7, 8, true));
+    }
+
+    #[test]
+    fn input_batch_stops_when_queue_is_empty_or_cap_is_hit() {
+        assert!(!super::should_continue_input_batch(1, 8, false));
+        assert!(!super::should_continue_input_batch(8, 8, true));
+        assert!(!super::should_continue_input_batch(9, 8, true));
     }
 
     #[test]
