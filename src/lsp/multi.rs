@@ -206,6 +206,11 @@ impl MultiLspManager {
             || msg.contains("channel closed")
     }
 
+    fn should_surface_error(message: &str) -> bool {
+        let msg = message.to_ascii_lowercase();
+        !msg.contains("lsp error (-32801)") && !msg.contains("lsp error (-32802)")
+    }
+
     fn command_name(command: &str) -> &str {
         Path::new(command)
             .file_name()
@@ -490,6 +495,9 @@ impl MultiLspManager {
                 if let LspNotification::Error { message } = &notification {
                     // Not all LSP "error" notifications are fatal (for example stderr logs).
                     // Keep the server ready unless we detect a transport/startup failure.
+                    if !Self::should_surface_error(message) {
+                        continue;
+                    }
                     if Self::is_fatal_error(message) {
                         instance.ready = false;
                         instance.analysis_ready = None;
@@ -877,6 +885,7 @@ impl Drop for MultiLspManager {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn make_manager(workspace_root: PathBuf) -> MultiLspManager {
@@ -903,6 +912,38 @@ mod tests {
             .expect("system time")
             .as_nanos();
         std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), nanos))
+    }
+
+    fn manager_with_rust_notifications(notifications: Vec<LspNotification>) -> MultiLspManager {
+        let mut manager = make_manager(PathBuf::from("/tmp/nevi_lsp_test"));
+        let (request_tx, _request_rx) = mpsc::channel::<crate::lsp::LspRequest>();
+        let (notification_tx, notification_rx) = mpsc::channel();
+
+        for notification in notifications {
+            notification_tx
+                .send(notification)
+                .expect("queue notification");
+        }
+        drop(notification_tx);
+
+        manager.instances.insert(
+            LanguageId::Rust,
+            LspInstance {
+                manager: LspManager {
+                    request_tx,
+                    notification_rx,
+                    thread_handle: None,
+                    status: crate::lsp::LspStatus::Ready,
+                },
+                ready: true,
+                analysis_ready: Some(true),
+                last_error: None,
+                progress: None,
+                current_file: None,
+                document_version: 0,
+            },
+        );
+        manager
     }
 
     #[test]
@@ -951,6 +992,54 @@ mod tests {
         ));
         assert!(!MultiLspManager::is_fatal_error(
             "LSP stderr: rust-analyzer: using proc-macro server"
+        ));
+    }
+
+    #[test]
+    fn benign_request_errors_are_not_user_facing() {
+        assert!(!MultiLspManager::should_surface_error(
+            "LSP error (-32801): content modified"
+        ));
+        assert!(!MultiLspManager::should_surface_error(
+            "LSP error (-32802): request cancelled"
+        ));
+        assert!(!MultiLspManager::should_surface_error(
+            "LSP error (-32802): RequestCancelled"
+        ));
+    }
+
+    #[test]
+    fn transport_and_startup_errors_remain_user_facing() {
+        assert!(MultiLspManager::should_surface_error(
+            "Failed to start LSP server: No such file or directory"
+        ));
+        assert!(MultiLspManager::should_surface_error(
+            "Failed to send didChange: Broken pipe (os error 32)"
+        ));
+        assert!(MultiLspManager::should_surface_error(
+            "LSP error (-32603): internal error"
+        ));
+    }
+
+    #[test]
+    fn poll_notifications_drops_benign_request_errors() {
+        let mut manager = manager_with_rust_notifications(vec![
+            LspNotification::Error {
+                message: "LSP error (-32802): request cancelled".to_string(),
+            },
+            LspNotification::Error {
+                message: "LSP error (-32603): internal error".to_string(),
+            },
+        ]);
+
+        let notifications = manager.poll_notifications();
+
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, LanguageId::Rust);
+        assert!(matches!(
+            &notifications[0].1,
+            LspNotification::Error { message }
+                if message == "LSP error (-32603): internal error"
         ));
     }
 
