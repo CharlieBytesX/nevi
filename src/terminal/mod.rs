@@ -6698,7 +6698,7 @@ impl ContentRowDamageCandidate {
             || editor.macros.is_recording()
             || editor.keymap.remap_insert(key) != key
             || Terminal::has_partial_render_blocking_ui(editor)
-            || !Self::is_simple_same_line_edit(editor, key)
+            || !Self::is_simple_same_line_insert_row_change(editor, key)
         {
             return None;
         }
@@ -6717,6 +6717,11 @@ impl ContentRowDamageCandidate {
         })
     }
 
+    fn is_simple_same_line_insert_row_change(editor: &Editor, key: KeyEvent) -> bool {
+        Self::is_simple_same_line_edit(editor, key)
+            || Self::is_simple_same_line_cursor_move(editor, key)
+    }
+
     fn is_simple_same_line_edit(editor: &Editor, key: KeyEvent) -> bool {
         match (key.modifiers, key.code) {
             (modifiers, KeyCode::Char(ch))
@@ -6728,6 +6733,16 @@ impl ContentRowDamageCandidate {
             }
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 editor.cursor.col > 0 && !Self::backspace_can_edit_auto_pair(editor)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_simple_same_line_cursor_move(editor: &Editor, key: KeyEvent) -> bool {
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Left) => editor.cursor.col > 0,
+            (KeyModifiers::NONE, KeyCode::Right) => {
+                editor.cursor.col < editor.buffer().line_len(editor.cursor.line)
             }
             _ => false,
         }
@@ -10655,6 +10670,14 @@ mod tests {
         KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
     }
 
+    fn left_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)
+    }
+
+    fn right_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)
+    }
+
     fn backspace_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)
     }
@@ -11343,6 +11366,126 @@ mod tests {
         assert!(
             editor.render_damage.requires_full_render(),
             "wrapped layout insert edits must stay on full-render path"
+        );
+    }
+
+    #[test]
+    fn insert_cursor_partial_render_after_right_repaints_current_row_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, right_key());
+
+        assert_eq!(editor.cursor.line, 1);
+        assert_eq!(editor.cursor.col, 5);
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "same-line insert-mode right movement should stay on partial-render path"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1]))
+        );
+    }
+
+    #[test]
+    fn insert_cursor_partial_render_after_left_repaints_current_row_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, left_key());
+
+        assert_eq!(editor.cursor.line, 1);
+        assert_eq!(editor.cursor.col, 3);
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "same-line insert-mode left movement should stay on partial-render path"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1]))
+        );
+    }
+
+    #[test]
+    fn insert_cursor_partial_render_left_at_line_start_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, left_key());
+
+        assert_eq!(editor.cursor.line, 1);
+        assert_eq!(editor.cursor.col, 0);
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "no-op insert-mode left movement should not enter a partial-render path"
+        );
+    }
+
+    #[test]
+    fn insert_cursor_partial_render_with_search_highlights_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.search_matches = vec![(1, 0, 4)];
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, right_key());
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "active search highlights should keep insert cursor movement on full-render path"
+        );
+    }
+
+    #[test]
+    fn insert_cursor_partial_render_with_wrap_enabled_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.settings.editor.wrap = true;
+        editor.replace_buffer_content("alpha row\nbeta row\ngamma row\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 4;
+        editor.enter_insert_mode();
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, right_key());
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "wrapped layout insert cursor movement must stay on full-render path"
         );
     }
 
