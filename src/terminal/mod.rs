@@ -6738,7 +6738,8 @@ impl CursorSameRowDamageCandidate {
 
     fn is_same_row_normal_move_key(key: KeyEvent) -> bool {
         match (key.modifiers, key.code) {
-            (KeyModifiers::NONE, KeyCode::Char('h' | 'l' | '0')) => true,
+            (KeyModifiers::NONE, KeyCode::Char('h' | 'l' | '0' | 'w' | 'b' | 'e')) => true,
+            (KeyModifiers::SHIFT, KeyCode::Char('W' | 'B' | 'E')) => true,
             (modifiers, KeyCode::Char('^' | '$')) => {
                 !modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
             }
@@ -11577,6 +11578,168 @@ mod tests {
         assert!(
             !editor.render_damage.requires_full_render(),
             "relative numbers do not require all visible rows for same-line cursor movement"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+    }
+
+    fn assert_normal_word_motion_marks_current_row(
+        key: KeyEvent,
+        start_col: usize,
+        expected_col: usize,
+    ) {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("header\nalpha beta gamma\nfooter\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = start_col;
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key);
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, expected_col));
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "same-row word motion should stay on partial-render path"
+        );
+        assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
+        assert!(editor.render_damage.statusline());
+        assert_eq!(
+            Terminal::partial_render_kind(&editor),
+            Some(PartialRenderKind::EditorRowsAndStatusLine(vec![1]))
+        );
+    }
+
+    #[test]
+    fn normal_w_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(key('w'), 0, 6);
+    }
+
+    #[test]
+    fn normal_b_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(key('b'), 11, 6);
+    }
+
+    #[test]
+    fn normal_e_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(key('e'), 0, 4);
+    }
+
+    #[test]
+    fn normal_big_w_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(shift_key('W'), 0, 6);
+    }
+
+    #[test]
+    fn normal_big_b_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(shift_key('B'), 11, 6);
+    }
+
+    #[test]
+    fn normal_big_e_marks_current_cursor_row_plus_statusline() {
+        assert_normal_word_motion_marks_current_row(shift_key('E'), 0, 4);
+    }
+
+    #[test]
+    fn normal_word_motion_that_crosses_line_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("alpha\nbeta gamma\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('w'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 0));
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "word motion crossing a line should stay on full-render path"
+        );
+    }
+
+    #[test]
+    fn normal_word_motion_with_count_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("header\nalpha beta gamma\nfooter\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('2'));
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('w'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 11));
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "counted word motion should stay on full-render path"
+        );
+    }
+
+    #[test]
+    fn normal_word_motion_with_search_highlights_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.replace_buffer_content("header\nalpha beta gamma\nfooter\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+        editor.search_matches = vec![(1, 6, 10)];
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('w'));
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "active search highlights should keep word movement on full-render path"
+        );
+    }
+
+    #[test]
+    fn normal_word_motion_with_wrap_enabled_keeps_full_render_damage() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.settings.editor.wrap = true;
+        editor.replace_buffer_content("header\nalpha beta gamma\nfooter\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('w'));
+
+        assert!(
+            editor.render_damage.requires_full_render(),
+            "wrapped layout word movement must stay on full-render path"
+        );
+    }
+
+    #[test]
+    fn normal_word_motion_with_relative_numbers_marks_current_row_only() {
+        let mut editor = Editor::default();
+        editor.set_size(80, 12);
+        editor.settings.editor.relative_numbers = true;
+        editor.replace_buffer_content("header\nalpha beta gamma\nfooter\n");
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+
+        let _ = render_editor_to_string(&editor);
+        editor.render_damage.clear_after_full_render();
+
+        handle_key(&mut editor, key('w'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 6));
+        assert!(
+            !editor.render_damage.requires_full_render(),
+            "relative numbers do not require all visible rows for same-row word movement"
         );
         assert_eq!(editor.render_damage.dirty_editor_rows(), vec![1]);
         assert!(editor.render_damage.statusline());
