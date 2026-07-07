@@ -62,6 +62,25 @@ brew tap anthonyamaro15/nevi
 brew install nevi
 ```
 
+Update an existing Homebrew install after a new Nevi release:
+
+```bash
+brew update
+brew upgrade nevi
+```
+
+If you installed with the fully qualified formula name, this also works:
+
+```bash
+brew upgrade anthonyamaro15/nevi/nevi
+```
+
+Verify the installed version:
+
+```bash
+nevi --version
+```
+
 ### Linux
 
 Linux users can build from source or install directly from GitHub with Cargo.
@@ -88,6 +107,12 @@ Then install Nevi:
 cargo install --git https://github.com/anthonyamaro15/nevi
 ```
 
+Update a Cargo-installed binary:
+
+```bash
+cargo install --git https://github.com/anthonyamaro15/nevi --force
+```
+
 Or build a local release binary:
 
 ```bash
@@ -95,6 +120,13 @@ git clone https://github.com/anthonyamaro15/nevi.git
 cd nevi
 cargo build --release
 ./target/release/nevi
+```
+
+Update a local source checkout:
+
+```bash
+git pull --ff-only
+cargo build --release
 ```
 
 Linux binary tarballs and distro packages (`.deb`, `.rpm`, AUR) are not
