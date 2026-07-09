@@ -215,6 +215,13 @@ fn oracle_categories() -> &'static [OracleCategory] {
     ORACLE_CATEGORIES
 }
 
+pub(crate) fn has_oracle_case(name: &str) -> bool {
+    oracle_categories()
+        .iter()
+        .flat_map(|category| category.cases)
+        .any(|case| case.name == name)
+}
+
 fn parse_key_sequence(input: &str) -> Result<Vec<KeyEvent>, String> {
     let mut keys = Vec::new();
     let mut chars = input.chars().peekable();
