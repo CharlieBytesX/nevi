@@ -14,6 +14,8 @@ pub mod harpoon;
 pub mod health;
 pub mod indent;
 pub mod input;
+#[cfg(test)]
+mod keybind_coverage;
 pub mod labeled_jump;
 pub mod lsp;
 pub mod markdown_preview;
