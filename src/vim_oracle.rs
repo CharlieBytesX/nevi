@@ -109,6 +109,36 @@ const MOTION_CASES: &[OracleCase] = &[
         keys: "$^",
     },
     OracleCase {
+        name: "find char forward",
+        initial_text: "abcade\n",
+        keys: "fa",
+    },
+    OracleCase {
+        name: "find char backward",
+        initial_text: "abcade\n",
+        keys: "$Fa",
+    },
+    OracleCase {
+        name: "till char forward",
+        initial_text: "abcade\n",
+        keys: "ta",
+    },
+    OracleCase {
+        name: "till char backward",
+        initial_text: "abcade\n",
+        keys: "$Ta",
+    },
+    OracleCase {
+        name: "repeat find char",
+        initial_text: "abcabcabc\n",
+        keys: "fa;",
+    },
+    OracleCase {
+        name: "reverse repeat find char",
+        initial_text: "abcabcabc\n",
+        keys: "fa;,",
+    },
+    OracleCase {
         name: "enter next line first nonblank",
         initial_text: "zero\n    one\n  two\nthree\n",
         keys: "<CR>",

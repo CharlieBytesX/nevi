@@ -101,12 +101,36 @@ const KEYBIND_COVERAGE: &[KeybindCoverage] = &[
     needs_oracle("H", "Move to top of visible screen"),
     needs_oracle("M", "Move to middle of visible screen"),
     needs_oracle("L", "Move to bottom of visible screen"),
-    needs_oracle("f{char}", "Find character forward on current line"),
-    needs_oracle("F{char}", "Find character backward on current line"),
-    needs_oracle("t{char}", "Move before character forward on current line"),
-    needs_oracle("T{char}", "Move after character backward on current line"),
-    needs_oracle(";", "Repeat latest find-character search"),
-    needs_oracle(",", "Repeat latest find-character search in reverse"),
+    vim_oracle(
+        "f{char}",
+        "Find character forward on current line",
+        "find char forward",
+    ),
+    vim_oracle(
+        "F{char}",
+        "Find character backward on current line",
+        "find char backward",
+    ),
+    vim_oracle(
+        "t{char}",
+        "Move before character forward on current line",
+        "till char forward",
+    ),
+    vim_oracle(
+        "T{char}",
+        "Move after character backward on current line",
+        "till char backward",
+    ),
+    vim_oracle(
+        ";",
+        "Repeat latest find-character search",
+        "repeat find char",
+    ),
+    vim_oracle(
+        ",",
+        "Repeat latest find-character search in reverse",
+        "reverse repeat find char",
+    ),
     needs_oracle("<C-f>", "Scroll page down"),
     needs_oracle("<C-b>", "Scroll page up"),
     needs_oracle("<C-d>", "Scroll half page down"),
@@ -282,6 +306,32 @@ mod tests {
             ("E", "big word end"),
             ("ge", "previous word end"),
             ("gE", "previous big word end"),
+        ];
+
+        for (key, oracle_case) in expected {
+            let entry = coverage_for(KeybindMode::Normal, key)
+                .unwrap_or_else(|| panic!("missing coverage entry for `{key}`"));
+
+            assert_eq!(entry.kind, CoverageKind::VimOracle);
+            assert_eq!(
+                entry.state,
+                CoverageState::Protected {
+                    test_id: oracle_case,
+                },
+                "`{key}` should be protected by oracle case `{oracle_case}`"
+            );
+        }
+    }
+
+    #[test]
+    fn find_char_defaults_are_oracle_covered() {
+        let expected = [
+            ("f{char}", "find char forward"),
+            ("F{char}", "find char backward"),
+            ("t{char}", "till char forward"),
+            ("T{char}", "till char backward"),
+            (";", "repeat find char"),
+            (",", "reverse repeat find char"),
         ];
 
         for (key, oracle_case) in expected {
